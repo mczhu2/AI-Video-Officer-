@@ -1,6 +1,6 @@
 # AI Video Officer
 
-基于 `Qwen-Omni-Realtime` 的单体视频面试 Demo。前端和后端都在这个仓库里，动作观察、语音引导、工作经历转写、发言点评、最终总结全部依赖 Omni 实时能力完成。
+基于 `Qwen-Omni-Realtime` 的单体视频面试 Demo。前端和后端都在这个仓库里，动作观察、实时引导、工作经历转写、发言点评、最终总结全部依赖 Omni 实时能力完成。
 
 ## 功能
 
@@ -10,10 +10,12 @@
 - 切题时会清空旧语音队列，避免上一题提示音串到下一题
 - 结果页展示动作结果、候选人转写、发言点评和总评
 
-## 目录
+## 代码位置
 
 - `server.js`：Node.js 后端，负责静态资源、浏览器 WebSocket、Omni Realtime 代理
 - `public/index.html`：单页前端
+- `package.json`：启动脚本和依赖定义
+- `DEPLOYMENT.md`：给其他 AI 或工程师使用的部署文档，包含服务器落点、Nginx、systemd、发布步骤
 
 ## 环境变量
 
@@ -23,7 +25,7 @@
 - `DASHSCOPE_REALTIME_VOICE`：可选，默认 `Tina`
 - `PORT`：可选，默认 `3000`
 
-## 启动
+## 本地启动
 
 ```bash
 npm install
@@ -43,13 +45,9 @@ http://127.0.0.1:3000
 http://127.0.0.1:3000/api/health
 ```
 
-## 反向代理
+## 部署入口
 
-如果前面挂 Nginx，请把：
-
-- `/` 指向静态页
-- `/api/` 反代到 Node 服务
-- `/api/realtime` 开启 WebSocket Upgrade
+完整部署说明见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 ## 说明
 
