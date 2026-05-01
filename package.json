@@ -1,0 +1,14 @@
+{
+  "name": "ai-video-officer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Omni-only realtime video interview demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

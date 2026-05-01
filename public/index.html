@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenClaw Omni 视频面试 Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(249, 115, 22, 0.24), transparent 30%),
+        radial-gradient(circle at top right, rgba(14, 165, 233, 0.18), transparent 32%),
+        linear-gradient(180deg, #08111f 0%, #030712 100%);
+      color: #eef2ff;
+      min-height: 100vh;
+    }
+    .screen {
+      min-height: 100vh;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .screen.active { display: flex; }
+    .card {
+      width: min(960px, 100%);
+      background: rgba(8, 15, 28, 0.86);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 28px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+      backdrop-filter: blur(18px);
+    }
+    #login-card {
+      max-width: 460px;
+      padding: 32px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    .eyebrow {
+      color: #fbbf24;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .title {
+      font-size: 34px;
+      line-height: 1.2;
+      margin-bottom: 14px;
+    }
+    .sub {
+      color: #b7c1d9;
+      line-height: 1.7;
+      font-size: 15px;
+      margin-bottom: 22px;
+    }
+    .stack { display: grid; gap: 12px; }
+    .btn {
+      border: none;
+      border-radius: 16px;
+      padding: 14px 18px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.16s ease, opacity 0.16s ease;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-primary {
+      background: linear-gradient(135deg, #f97316, #fb7185);
+      color: #fff;
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    #interview-card {
+      padding: 20px;
+      display: grid;
+      grid-template-columns: minmax(320px, 1.15fr) minmax(280px, 0.85fr);
+      gap: 18px;
+    }
+    .video-shell {
+      position: relative;
+      border-radius: 24px;
+      overflow: hidden;
+      min-height: 560px;
+      background:
+        radial-gradient(circle at top, rgba(14, 165, 233, 0.16), transparent 36%),
+        linear-gradient(180deg, #111827, #020617);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    #local-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      background: #020617;
+    }
+    .video-badge {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(2, 6, 23, 0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      font-size: 13px;
+      color: #a7f3d0;
+      backdrop-filter: blur(8px);
+    }
+    .panel {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 14px;
+      min-height: 560px;
+    }
+    .panel-block {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 22px;
+      padding: 18px;
+    }
+    .step-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .step-pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #94a3b8;
+      font-size: 13px;
+      background: rgba(255,255,255,0.03);
+    }
+    .step-pill.active {
+      color: #fff;
+      background: rgba(249, 115, 22, 0.18);
+      border-color: rgba(249, 115, 22, 0.48);
+    }
+    .step-pill.done {
+      color: #86efac;
+      border-color: rgba(74, 222, 128, 0.32);
+      background: rgba(74, 222, 128, 0.14);
+    }
+    .label {
+      font-size: 12px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+    }
+    #assistant-text {
+      font-size: 22px;
+      line-height: 1.65;
+      color: #f8fafc;
+      min-height: 108px;
+      white-space: pre-wrap;
+    }
+    #status-text, #transcript-text {
+      color: #cbd5e1;
+      line-height: 1.7;
+      font-size: 15px;
+    }
+    #transcript-text {
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .hint {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+    #summary-card {
+      padding: 28px;
+      max-width: 920px;
+    }
+    .report-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .report-box {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 22px;
+      padding: 18px;
+    }
+    .report-box.full { grid-column: 1 / -1; }
+    .report-box pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #e2e8f0;
+      font: inherit;
+      line-height: 1.7;
+    }
+    .report-list {
+      display: grid;
+      gap: 10px;
+      color: #e2e8f0;
+      line-height: 1.6;
+    }
+    .ok { color: #86efac; }
+    .warn { color: #fbbf24; }
+    #hidden-canvas { display: none; }
+    @media (max-width: 860px) {
+      #interview-card {
+        grid-template-columns: 1fr;
+      }
+      .video-shell, .panel { min-height: auto; }
+      .report-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <section id="login-screen" class="screen active">
+    <div class="card" id="login-card">
+      <div class="eyebrow">Qwen-Omni-Realtime</div>
+      <h1 class="title">OpenClaw 视频面试 Demo</h1>
+      <p class="sub">动作判断、实时引导、转写、追问总结都只依赖 Omni。流程固定，单题超时后会自动进入下一步。</p>
+      <div class="stack">
+        <button id="start-btn" class="btn btn-primary">开始面试</button>
+        <div class="hint">固定流程：举左手 8 秒、举右手 8 秒、左转 8 秒、右转 8 秒、35 秒工作经历介绍、最终总结。</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="interview-screen" class="screen">
+    <div class="card" id="interview-card">
+      <div class="video-shell">
+        <video id="local-video" autoplay playsinline muted></video>
+        <div class="video-badge" id="video-badge">摄像头准备中</div>
+        <canvas id="hidden-canvas"></canvas>
+      </div>
+      <div class="panel">
+        <div class="panel-block">
+          <div class="label">步骤进度</div>
+          <div class="step-row" id="step-row"></div>
+        </div>
+        <div class="panel-block">
+          <div class="label">AI 面试官</div>
+          <div id="assistant-text">正在连接 Omni 实时会话...</div>
+        </div>
+        <div class="panel-block">
+          <div class="label">状态</div>
+          <div id="status-text">等待开始</div>
+          <div class="label" style="margin-top:14px;">候选人转写</div>
+          <div id="transcript-text">工作经历介绍阶段的转写会显示在这里。</div>
+        </div>
+        <div class="panel-block">
+          <div class="actions">
+            <button id="finish-speech-btn" class="btn btn-secondary" style="display:none;">提前结束发言</button>
+            <span class="hint">动作题会自动观察 8 秒后判断一次；到时未完成也会自动进入下一步。工作经历介绍固定 35 秒。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="summary-screen" class="screen">
+    <div class="card" id="summary-card">
+      <div class="eyebrow">Interview Report</div>
+      <h2 class="title" style="font-size:30px;">面试已完成</h2>
+      <p class="sub" id="summary-headline">正在整理最后结果...</p>
+      <div class="report-grid">
+        <div class="report-box">
+          <div class="label">动作结果</div>
+          <div id="report-actions" class="report-list"></div>
+        </div>
+        <div class="report-box">
+          <div class="label">候选人转写</div>
+          <pre id="report-transcripts"></pre>
+        </div>
+        <div class="report-box">
+          <div class="label">发言点评</div>
+          <pre id="report-speech-comment"></pre>
+        </div>
+        <div class="report-box full">
+          <div class="label">Omni 总结</div>
+          <pre id="report-summary"></pre>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:20px;">
+        <button class="btn btn-primary" onclick="location.reload()">重新开始</button>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const STEP_DEFS = [
+      { id: 'left_hand', label: '举左手' },
+      { id: 'right_hand', label: '举右手' },
+      { id: 'turn_left', label: '左转' },
+      { id: 'turn_right', label: '右转' },
+      { id: 'speech', label: '工作经历介绍' },
+    ];
+
+    const ACTION_DURATION_MS = 8000;
+    const SPEECH_DURATION_MS = 35000;
+
+    const state = {
+      ws: null,
+      mediaStream: null,
+      audioContext: null,
+      playbackTime: 0,
+      playingSources: new Set(),
+      micProcessor: null,
+      micSource: null,
+      muteGain: null,
+      speechActive: false,
+      speechTimer: null,
+      speechDeadlineTimer: null,
+      speechFrames: [],
+      actionTimer: null,
+      currentStepId: '',
+      currentStepIndex: -1,
+      actionResults: [],
+      transcripts: [],
+      summary: '',
+      speechComment: '',
+      lastAssistantText: '',
+    };
+
+    const loginScreen = document.getElementById('login-screen');
+    const interviewScreen = document.getElementById('interview-screen');
+    const summaryScreen = document.getElementById('summary-screen');
+    const startBtn = document.getElementById('start-btn');
+    const finishSpeechBtn = document.getElementById('finish-speech-btn');
+    const assistantTextEl = document.getElementById('assistant-text');
+    const statusTextEl = document.getElementById('status-text');
+    const transcriptTextEl = document.getElementById('transcript-text');
+    const videoBadgeEl = document.getElementById('video-badge');
+    const localVideo = document.getElementById('local-video');
+    const hiddenCanvas = document.getElementById('hidden-canvas');
+
+    startBtn.addEventListener('click', startInterview);
+    finishSpeechBtn.addEventListener('click', finishSpeechCapture);
+
+    function showScreen(name) {
+      loginScreen.classList.toggle('active', name === 'login');
+      interviewScreen.classList.toggle('active', name === 'interview');
+      summaryScreen.classList.toggle('active', name === 'summary');
+    }
+
+    function updateStatus(text) {
+      statusTextEl.textContent = text;
+    }
+
+    function renderSteps() {
+      const container = document.getElementById('step-row');
+      container.innerHTML = STEP_DEFS.map((step, index) => {
+        let cls = 'step-pill';
+        if (index < state.currentStepIndex) cls += ' done';
+        else if (index === state.currentStepIndex) cls += ' active';
+        return '<div class="' + cls + '">' + step.label + '</div>';
+      }).join('');
+    }
+
+    async function startInterview() {
+      startBtn.disabled = true;
+      try {
+        await initMedia();
+        await initAudio();
+        showScreen('interview');
+        updateStatus('媒体权限已获取，正在连接后端...');
+        connectBackend();
+      } catch (err) {
+        alert('启动失败：' + err.message);
+        startBtn.disabled = false;
+      }
+    }
+
+    async function initMedia() {
+      state.mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 960 },
+          height: { ideal: 540 },
+          facingMode: 'user',
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      localVideo.srcObject = state.mediaStream;
+      await localVideo.play();
+      videoBadgeEl.textContent = '视频已连接';
+    }
+
+    async function initAudio() {
+      state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      await state.audioContext.resume();
+
+      state.micSource = state.audioContext.createMediaStreamSource(state.mediaStream);
+      state.micProcessor = state.audioContext.createScriptProcessor(4096, 1, 1);
+      state.muteGain = state.audioContext.createGain();
+      state.muteGain.gain.value = 0;
+
+      state.micProcessor.onaudioprocess = function(event) {
+        if (!state.speechActive || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const downsampled = downsampleBuffer(input, state.audioContext.sampleRate, 16000);
+        if (!downsampled.length) return;
+        const pcm = floatTo16BitPCM(downsampled);
+        state.ws.send(JSON.stringify({
+          type: 'speech.audio_chunk',
+          audio: arrayBufferToBase64(pcm.buffer),
+        }));
+      };
+
+      state.micSource.connect(state.micProcessor);
+      state.micProcessor.connect(state.muteGain);
+      state.muteGain.connect(state.audioContext.destination);
+    }
+
+    function connectBackend() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      state.ws = new WebSocket(protocol + '//' + location.host + '/api/realtime');
+
+      state.ws.addEventListener('open', () => {
+        updateStatus('后端已连接，正在创建 Omni 会话...');
+        state.ws.send(JSON.stringify({ type: 'session.start' }));
+      });
+
+      state.ws.addEventListener('message', (event) => {
+        handleBackendMessage(JSON.parse(event.data));
+      });
+
+      state.ws.addEventListener('close', () => {
+        stopAssistantAudio();
+        clearActionTimer();
+        clearSpeechTimers();
+        if (!summaryScreen.classList.contains('active')) {
+          updateStatus('连接已关闭，请刷新页面重试');
+        }
+      });
+
+      state.ws.addEventListener('error', () => {
+        updateStatus('连接异常，请刷新页面重试');
+      });
+    }
+
+    function handleBackendMessage(message) {
+      switch (message.type) {
+        case 'backend.ready':
+          updateStatus('Omni 已连接，准备开始');
+          break;
+        case 'stage.changed':
+          stopAssistantAudio();
+          clearActionTimer();
+          clearSpeechTimers();
+          state.currentStepId = message.step.id;
+          state.currentStepIndex = message.stepIndex;
+          state.lastAssistantText = '';
+          assistantTextEl.textContent = '...';
+          renderSteps();
+          updateStatus('当前步骤：' + message.step.label);
+          break;
+        case 'assistant.audio.delta':
+          playAssistantAudio(message.delta);
+          break;
+        case 'assistant.text.delta':
+          state.lastAssistantText += message.delta || '';
+          assistantTextEl.textContent = state.lastAssistantText || '...';
+          break;
+        case 'assistant.text.done':
+          state.lastAssistantText = message.text || '';
+          assistantTextEl.textContent = state.lastAssistantText || '...';
+          break;
+        case 'action.capture.start':
+          beginActionWindow(message.durationMs || ACTION_DURATION_MS);
+          break;
+        case 'action.result':
+          clearActionTimer();
+          recordActionResult(message.status, message.step.label, message.message || '');
+          break;
+        case 'speech.capture.start':
+          beginSpeechCapture(message.durationMs || SPEECH_DURATION_MS);
+          break;
+        case 'user.transcript':
+          if (message.text) {
+            state.transcripts.push(message.text);
+            transcriptTextEl.textContent = state.transcripts.join('\n');
+          }
+          break;
+        case 'interview.complete':
+          stopAssistantAudio();
+          clearActionTimer();
+          clearSpeechTimers();
+          state.summary = message.summary || '';
+          state.speechComment = message.speechComment || '';
+          renderSummary(message.report || {});
+          break;
+        case 'error':
+          updateStatus('错误：' + (message.message || '未知异常'));
+          assistantTextEl.textContent = message.message || '系统异常';
+          break;
+      }
+    }
+
+    function beginActionWindow(durationMs) {
+      clearActionTimer();
+      const seconds = Math.round(durationMs / 1000);
+      updateStatus('动作观察中，约 ' + seconds + ' 秒后自动判断');
+      state.actionTimer = window.setTimeout(async () => {
+        const frames = await captureFrames(4, 220);
+        updateStatus('动作时间到，正在交给 Omni 判断');
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+          state.ws.send(JSON.stringify({
+            type: 'action.evaluate',
+            frames,
+          }));
+        }
+      }, durationMs);
+    }
+
+    function clearActionTimer() {
+      if (state.actionTimer) {
+        window.clearTimeout(state.actionTimer);
+        state.actionTimer = null;
+      }
+    }
+
+    function clearSpeechTimers() {
+      state.speechActive = false;
+      if (state.speechTimer) {
+        window.clearInterval(state.speechTimer);
+        state.speechTimer = null;
+      }
+      if (state.speechDeadlineTimer) {
+        window.clearTimeout(state.speechDeadlineTimer);
+        state.speechDeadlineTimer = null;
+      }
+      finishSpeechBtn.disabled = true;
+      finishSpeechBtn.style.display = 'none';
+    }
+
+    function recordActionResult(status, label, message) {
+      const normalized = status === 'pass' ? '通过' : '未通过';
+      state.actionResults.push({
+        label,
+        status: normalized,
+        note: message,
+      });
+      updateStatus(label + '：' + normalized + '，即将进入下一步');
+      assistantTextEl.textContent = message || assistantTextEl.textContent;
+    }
+
+    function beginSpeechCapture(durationMs) {
+      clearSpeechTimers();
+      state.speechActive = true;
+      state.speechFrames = [];
+      finishSpeechBtn.style.display = 'inline-flex';
+      finishSpeechBtn.disabled = false;
+      updateStatus('发言阶段已开始，固定时长 ' + Math.round(durationMs / 1000) + ' 秒');
+      captureSpeechFrame();
+      state.speechTimer = window.setInterval(captureSpeechFrame, 1000);
+      state.speechDeadlineTimer = window.setTimeout(() => {
+        if (state.speechActive) finishSpeechCapture();
+      }, durationMs);
+    }
+
+    function captureSpeechFrame() {
+      const frame = captureFrame();
+      if (!frame) return;
+      state.speechFrames.push(frame);
+      if (state.speechFrames.length > 4) state.speechFrames.shift();
+    }
+
+    function finishSpeechCapture() {
+      if (!state.speechActive) return;
+      state.speechActive = false;
+      if (state.speechTimer) {
+        window.clearInterval(state.speechTimer);
+        state.speechTimer = null;
+      }
+      if (state.speechDeadlineTimer) {
+        window.clearTimeout(state.speechDeadlineTimer);
+        state.speechDeadlineTimer = null;
+      }
+      finishSpeechBtn.disabled = true;
+      finishSpeechBtn.style.display = 'none';
+      updateStatus('发言时间结束，正在生成最终总结');
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({
+          type: 'speech.finish',
+          frames: state.speechFrames.slice(-3),
+        }));
+      }
+    }
+
+    async function captureFrames(count, delayMs) {
+      const frames = [];
+      for (let i = 0; i < count; i += 1) {
+        const frame = captureFrame();
+        if (frame) frames.push(frame);
+        if (i < count - 1) {
+          await sleep(delayMs);
+        }
+      }
+      return frames;
+    }
+
+    function captureFrame() {
+      if (!localVideo.videoWidth || !localVideo.videoHeight) return null;
+      hiddenCanvas.width = localVideo.videoWidth;
+      hiddenCanvas.height = localVideo.videoHeight;
+      const ctx = hiddenCanvas.getContext('2d');
+      ctx.save();
+      ctx.translate(hiddenCanvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(localVideo, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+      ctx.restore();
+      return hiddenCanvas.toDataURL('image/jpeg', 0.76);
+    }
+
+    function stopAssistantAudio() {
+      state.playingSources.forEach((source) => {
+        try {
+          source.onended = null;
+          source.stop(0);
+        } catch (err) {
+        }
+      });
+      state.playingSources.clear();
+      if (state.audioContext) {
+        state.playbackTime = state.audioContext.currentTime;
+      } else {
+        state.playbackTime = 0;
+      }
+    }
+
+    function playAssistantAudio(base64Pcm) {
+      if (!base64Pcm || !state.audioContext) return;
+      const bytes = base64ToUint8Array(base64Pcm);
+      const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+      const audioBuffer = state.audioContext.createBuffer(1, int16.length, 24000);
+      const channel = audioBuffer.getChannelData(0);
+      for (let i = 0; i < int16.length; i += 1) {
+        channel[i] = int16[i] / 32768;
+      }
+      const source = state.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(state.audioContext.destination);
+      source.onended = () => {
+        state.playingSources.delete(source);
+      };
+      state.playingSources.add(source);
+      const startAt = Math.max(state.audioContext.currentTime + 0.03, state.playbackTime || 0);
+      source.start(startAt);
+      state.playbackTime = startAt + audioBuffer.duration;
+    }
+
+    function renderSummary(report) {
+      const reportTranscripts = Array.isArray(report.transcripts) && report.transcripts.length
+        ? report.transcripts
+        : state.transcripts;
+      showScreen('summary');
+      document.getElementById('summary-headline').textContent = state.summary || '面试已结束';
+      document.getElementById('report-summary').textContent = state.summary || '未生成总结';
+      document.getElementById('report-transcripts').textContent = reportTranscripts.join('\n') || '无有效转写';
+      document.getElementById('report-speech-comment').textContent = state.speechComment || '未生成点评';
+      document.getElementById('report-actions').innerHTML = (report.actions || []).map((item) => {
+        const statusClass = item.status === 'pass' ? 'ok' : 'warn';
+        const statusText = item.status === 'pass' ? '通过' : '未通过';
+        return '<div><span class="' + statusClass + '">' + item.label + '：' + statusText + '</span><br><span class="hint">' + (item.note || '') + '</span></div>';
+      }).join('') || '<div class="warn">没有记录到动作结果</div>';
+    }
+
+    function downsampleBuffer(buffer, sampleRate, outRate) {
+      if (outRate === sampleRate) return buffer;
+      if (outRate > sampleRate) throw new Error('输出采样率不能高于输入采样率');
+      const sampleRateRatio = sampleRate / outRate;
+      const newLength = Math.round(buffer.length / sampleRateRatio);
+      const result = new Float32Array(newLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+        let accum = 0;
+        let count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i += 1) {
+          accum += buffer[i];
+          count += 1;
+        }
+        result[offsetResult] = count ? accum / count : 0;
+        offsetResult += 1;
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result;
+    }
+
+    function floatTo16BitPCM(float32Array) {
+      const buffer = new ArrayBuffer(float32Array.length * 2);
+      const view = new DataView(buffer);
+      for (let i = 0; i < float32Array.length; i += 1) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return new Uint8Array(buffer);
+    }
+
+    function arrayBufferToBase64(buffer) {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+      }
+      return btoa(binary);
+    }
+
+    function base64ToUint8Array(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+  </script>
+</body>
+</html>
