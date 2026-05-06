@@ -19,6 +19,10 @@ const {
   buildRealtimeSessionConfig,
   shouldForwardAssistantMedia,
 } = require('./lib/omni-prompt');
+const {
+  isMeaningfulTranscript,
+  shouldRetryTranscriptionWait,
+} = require('./lib/transcription-utils');
 
 const PORT = Number(process.env.PORT || 3000);
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || '';
@@ -32,6 +36,7 @@ const LOG_DIR = path.join(__dirname, 'logs');
 const DEBUG_LOG_FILE = path.join(LOG_DIR, 'interview-debug.jsonl');
 const ACTION_EVAL_TIMEOUT_MS = 8000;
 const SPEECH_TRANSCRIPT_TIMEOUT_MS = 4000;
+const SPEECH_TRANSCRIPT_RETRY_TIMEOUT_MS = 3000;
 const QUESTION_SESSION_INSTRUCTIONS = [
   '你是视频面试助手。',
   '当系统通过单次 response 指令要求你播报问题时，你要像真实面试官一样自然说话。',
@@ -221,6 +226,29 @@ function clearSpeechTranscriptTimer(session) {
     clearTimeout(session.speechTranscriptTimer);
     session.speechTranscriptTimer = null;
   }
+}
+
+function scheduleSpeechTranscriptTimeout(session, delayMs) {
+  clearSpeechTranscriptTimer(session);
+  session.speechTranscriptTimer = setTimeout(() => {
+    if (session.phase !== 'question_transcribing' || session.speechEvaluationRequested) return;
+    const transcriptCount = (session.currentQuestionTranscripts || []).length;
+    if (shouldRetryTranscriptionWait({ transcriptCount, retryCount: session.transcriptionRetryCount })) {
+      session.transcriptionRetryCount += 1;
+      logInterviewEvent(session, 'question.transcription.retry_wait', {
+        transcriptCount,
+        retryCount: session.transcriptionRetryCount,
+        delayMs: SPEECH_TRANSCRIPT_RETRY_TIMEOUT_MS,
+      });
+      scheduleSpeechTranscriptTimeout(session, SPEECH_TRANSCRIPT_RETRY_TIMEOUT_MS);
+      return;
+    }
+    logInterviewEvent(session, 'question.transcription.timeout', {
+      transcriptCount,
+      retryCount: session.transcriptionRetryCount,
+    });
+    requestSpeechEvaluation(session);
+  }, delayMs);
 }
 
 function completeFinalEvaluation(session, parsed, rawTranscript) {
@@ -648,6 +676,7 @@ function finishSpeech(session, frames) {
 
   session.phase = 'question_transcribing';
   session.lastAssistantTranscript = '';
+  session.transcriptionRetryCount = 0;
   session.pendingSpeechFrames = Array.isArray(frames)
     ? frames.slice(0, 4).map((frame) => stripDataUrlPrefix(frame)).filter(Boolean)
     : [];
@@ -657,16 +686,16 @@ function finishSpeech(session, frames) {
     chunkCount: session.speechChunkIndex,
     frameCount: session.pendingSpeechFrames.length,
   });
+  sendUpstream(session, {
+    type: 'session.update',
+    session: buildRealtimeSessionConfig({
+      voice: REALTIME_VOICE,
+      maxTokens: 160,
+      instructions: SPEECH_TRANSCRIPTION_INSTRUCTIONS,
+    }),
+  });
   sendUpstream(session, { type: 'input_audio_buffer.commit' });
-  clearSpeechTranscriptTimer(session);
-  session.speechTranscriptTimer = setTimeout(() => {
-    if (session.phase === 'question_transcribing' && !session.speechEvaluationRequested) {
-      logInterviewEvent(session, 'question.transcription.timeout', {
-        transcriptCount: (session.currentQuestionTranscripts || []).length,
-      });
-      requestSpeechEvaluation(session);
-    }
-  }, SPEECH_TRANSCRIPT_TIMEOUT_MS);
+  scheduleSpeechTranscriptTimeout(session, SPEECH_TRANSCRIPT_TIMEOUT_MS);
 }
 
 function handleAssistantDone(session) {
@@ -710,6 +739,7 @@ function handleAssistantDone(session) {
     if (!step) return;
     session.phase = 'question_ready';
     session.acceptUserTranscript = true;
+    sendUpstream(session, { type: 'input_audio_buffer.clear' });
     sendUpstream(session, {
       type: 'session.update',
       session: buildRealtimeSessionConfig({
@@ -754,6 +784,7 @@ function createSession(browser) {
     speechChunkIndex: 0,
     speechTranscriptTimer: null,
     speechEvaluationRequested: false,
+    transcriptionRetryCount: 0,
     speechEvalSocket: null,
     finalEvaluationRequested: false,
     finalEvalSocket: null,
@@ -843,7 +874,7 @@ function connectUpstream(session) {
 
     if (message.type === 'conversation.item.input_audio_transcription.completed') {
       const text = String(message.transcript || '').trim();
-      if (text && session.acceptUserTranscript) {
+      if (text && session.acceptUserTranscript && isMeaningfulTranscript(text)) {
         session.currentQuestionTranscripts.push(text);
         logInterviewEvent(session, 'user.transcript.completed', {
           transcriptIndex: session.currentQuestionTranscripts.length - 1,
@@ -857,6 +888,13 @@ function connectUpstream(session) {
         if (session.phase === 'question_transcribing' && !session.speechEvaluationRequested) {
           requestSpeechEvaluation(session);
         }
+      } else if (text) {
+        logInterviewEvent(session, 'user.transcript.ignored', {
+          transcript: text,
+          acceptUserTranscript: session.acceptUserTranscript,
+          phase: session.phase,
+          reason: session.acceptUserTranscript ? 'not_meaningful' : 'not_accepting',
+        });
       }
       return;
     }
