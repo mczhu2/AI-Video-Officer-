@@ -82,6 +82,37 @@ test('buildCourierInterviewReport aggregates action and question results', () =>
   assert.match(report.deliveryCapacity, /120 单/);
   assert.match(report.exceptionHandling, /联系客户/);
   assert.match(report.serviceAwareness, /投诉/);
-  assert.match(report.recommendation, /建议进入下一轮/);
-  assert.match(report.summary, /快递员面试/);
+  assert.match(report.recommendation, /基本符合普通快递员岗位要求/);
+  assert.match(report.recommendation, /安排试岗/);
+  assert.match(report.summary, /普通快递员岗位所需/);
+});
+
+
+test('buildCourierInterviewReport uses ordinary-courier acceptance instead of excellence bar', () => {
+  const report = buildCourierInterviewReport({
+    actions: [
+      { stepId: 'left_hand', label: '举左手', status: 'pass', note: '健康：动作正常，无异常。' },
+      { stepId: 'right_hand', label: '举右手', status: 'pass', note: '健康：动作正常，无异常。' },
+    ],
+    questionEvaluations: [
+      { stepId: 'courier_q1', label: '配送经验', transcript: '送过外卖，也送过快递。', judgement: '有相关经验。' },
+      { stepId: 'courier_q2', label: '单量效率', transcript: '一天几十单，忙的时候更多。', judgement: '有基础单量概念。' },
+      { stepId: 'courier_q3', label: '异常处理', transcript: '电话打不通就联系站点。', judgement: '有基本处理思路。' },
+      { stepId: 'courier_q4', label: '投诉处理', transcript: '先跟客户解释，不行找站长。', judgement: '能正常表达。' },
+    ],
+  });
+
+  assert.match(report.recommendation, /基本符合普通快递员岗位要求/);
+  assert.doesNotMatch(report.recommendation, /优秀|复杂投诉|高峰承压/);
+});
+
+test('parseCourierQuestionEvaluation fallback avoids direct rejection for short answers', () => {
+  const parsed = parseCourierQuestionEvaluation(
+    '模型没有按格式返回',
+    { id: 'courier_q1', label: '配送经验' },
+    '做过'
+  );
+
+  assert.match(parsed.judgement, /普通快递员岗位/);
+  assert.match(parsed.risk, /不直接作为淘汰依据/);
 });

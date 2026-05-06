@@ -35,6 +35,9 @@ test('buildFinalEvaluationInstructions includes question judgements and risks', 
   assert.match(instructions, /效率信号较强/);
   assert.match(instructions, /未说明极端天气表现/);
   assert.match(instructions, /严禁直接复述候选人原话拼接成结论/);
+  assert.match(instructions, /普通快递员，不是优秀快递员/);
+  assert.match(instructions, /基本符合\/可以进入下一轮\/建议试岗/);
+  assert.match(instructions, /不要因为回答不够优秀/);
 });
 
 test('parseFinalEvaluation extracts structured courier final report', () => {
