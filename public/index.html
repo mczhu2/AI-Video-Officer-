@@ -4,8 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI 视频面试</title>
+  <link rel="icon" href="data:,">
   <style>
     * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      overflow-x: hidden;
+    }
     body {
       margin: 0;
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -17,7 +23,7 @@
       min-height: 100vh;
     }
     .screen {
-      min-height: 100vh;
+      min-height: 100svh;
       display: none;
       align-items: center;
       justify-content: center;
@@ -76,17 +82,23 @@
       color: #fff;
       border: 1px solid rgba(255,255,255,0.12);
     }
+    #interview-screen {
+      padding: 12px;
+    }
     #interview-card {
-      padding: 18px;
+      width: min(1180px, 100%);
+      height: min(760px, calc(100svh - 24px));
+      padding: 14px;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
-      gap: 16px;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+      gap: 14px;
     }
     .video-shell {
       position: relative;
       border-radius: 24px;
       overflow: hidden;
-      min-height: 560px;
+      min-height: 0;
+      height: 100%;
       background:
         radial-gradient(circle at top, rgba(14, 165, 233, 0.16), transparent 36%),
         linear-gradient(180deg, #111827, #020617);
@@ -98,6 +110,130 @@
       object-fit: cover;
       transform: scaleX(-1);
       background: #020617;
+    }
+    .video-gradient {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(2,6,23,0.18) 0%, rgba(2,6,23,0.05) 44%, rgba(2,6,23,0.72) 100%),
+        linear-gradient(90deg, rgba(2,6,23,0.35), transparent 42%);
+    }
+    .avatar-card {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      width: min(220px, 34%);
+      min-width: 150px;
+      aspect-ratio: 4 / 5;
+      border-radius: 28px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 28%, rgba(56,189,248,0.28), transparent 36%),
+        linear-gradient(180deg, rgba(15,23,42,0.86), rgba(2,6,23,0.96));
+      border: 1px solid rgba(255,255,255,0.18);
+      box-shadow: 0 22px 58px rgba(0,0,0,0.42);
+      backdrop-filter: blur(16px);
+    }
+    .avatar-minimal {
+      position: absolute;
+      inset: 14px 14px 40px;
+      display: grid;
+      place-items: center;
+    }
+    .avatar-orb {
+      position: relative;
+      width: 92px;
+      height: 92px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), rgba(125,211,252,0.72) 20%, rgba(14,165,233,0.86) 52%, rgba(37,99,235,0.72) 100%);
+      box-shadow:
+        0 0 0 14px rgba(14,165,233,0.08),
+        0 0 42px rgba(56,189,248,0.44),
+        inset -10px -14px 24px rgba(15,23,42,0.22);
+    }
+    .avatar-orb::before,
+    .avatar-orb::after {
+      content: '';
+      position: absolute;
+      inset: -18px;
+      border-radius: inherit;
+      border: 1px solid rgba(125,211,252,0.28);
+      opacity: 0.42;
+    }
+    .avatar-orb::after {
+      inset: -34px;
+      opacity: 0.22;
+    }
+    .avatar-card.speaking .avatar-orb {
+      animation: orb-speaking 0.72s infinite ease-in-out;
+    }
+    .avatar-card.speaking .avatar-orb::before {
+      animation: ring-speaking 1.1s infinite ease-out;
+    }
+    .avatar-card.speaking .avatar-orb::after {
+      animation: ring-speaking 1.1s 0.22s infinite ease-out;
+    }
+    .avatar-wave {
+      position: absolute;
+      left: 50%;
+      bottom: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transform: translateX(-50%);
+    }
+    .avatar-wave span {
+      width: 5px;
+      height: 14px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #e0f2fe, #38bdf8);
+      opacity: 0.36;
+      transform-origin: 50% 100%;
+    }
+    .avatar-card.speaking .avatar-wave span {
+      opacity: 0.95;
+      animation: wave-speaking 0.68s infinite ease-in-out;
+    }
+    .avatar-wave span:nth-child(2) { animation-delay: 0.08s; }
+    .avatar-wave span:nth-child(3) { animation-delay: 0.16s; }
+    .avatar-wave span:nth-child(4) { animation-delay: 0.24s; }
+    .avatar-wave span:nth-child(5) { animation-delay: 0.32s; }
+    .avatar-caption {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 10px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: #e2e8f0;
+      font-size: 12px;
+      text-shadow: 0 1px 8px rgba(0,0,0,0.72);
+    }
+    .avatar-status-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 5px rgba(34,197,94,0.16);
+    }
+    @keyframes orb-speaking {
+      0%, 100% { transform: scale(1); filter: brightness(1); }
+      50% { transform: scale(1.08); filter: brightness(1.16); }
+    }
+    @keyframes ring-speaking {
+      0% { transform: scale(0.82); opacity: 0.48; }
+      100% { transform: scale(1.38); opacity: 0; }
+    }
+    @keyframes wave-speaking {
+      0%, 100% { transform: scaleY(0.58); }
+      50% { transform: scaleY(1.8); }
     }
     .video-badge {
       position: absolute;
@@ -115,7 +251,8 @@
       display: grid;
       grid-template-rows: 1fr auto;
       gap: 12px;
-      min-height: 560px;
+      min-height: 0;
+      height: 100%;
     }
     .panel-card {
       background: rgba(255,255,255,0.04);
@@ -128,8 +265,9 @@
     }
     .focus-stack {
       display: grid;
-      gap: 16px;
+      gap: 14px;
       align-content: start;
+      height: 100%;
     }
     .step-row {
       display: flex;
@@ -196,9 +334,9 @@
     }
     #assistant-text {
       font-size: 20px;
-      line-height: 1.65;
+      line-height: 1.58;
       color: #f8fafc;
-      min-height: 88px;
+      min-height: 72px;
       white-space: pre-wrap;
     }
     #status-text, #transcript-text {
@@ -207,14 +345,32 @@
       font-size: 15px;
     }
     #transcript-text {
-      min-height: 96px;
-      max-height: 220px;
+      min-height: 82px;
+      max-height: 160px;
       overflow: auto;
       white-space: pre-wrap;
       background: rgba(2, 6, 23, 0.42);
       border: 1px solid rgba(255,255,255,0.06);
       border-radius: 18px;
       padding: 14px;
+    }
+    .auto-capture-panel {
+      display: grid;
+      gap: 10px;
+    }
+    .capture-meter {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(148,163,184,0.2);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .capture-meter-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #22c55e, #f97316);
+      transition: width 0.08s linear;
     }
     .actions {
       display: flex;
@@ -328,26 +484,116 @@
     .warn { color: #fbbf24; }
     #hidden-canvas { display: none; }
     @media (max-width: 860px) {
+      body { overflow: hidden; }
+      #interview-screen {
+        align-items: stretch;
+        padding: 0;
+        height: 100svh;
+        min-height: 100svh;
+      }
       #interview-card {
-        grid-template-columns: 1fr;
-        padding: 12px;
+        width: 100vw;
+        height: 100svh;
+        padding: 0;
+        display: block;
+        border: 0;
+        border-radius: 0;
+        background: #020617;
       }
       .video-shell {
-        min-height: 320px;
+        position: absolute;
+        inset: 0;
+        border: 0;
+        border-radius: 0;
+        height: 100svh;
+        min-height: 100svh;
       }
+      .video-badge {
+        left: 12px;
+        top: 12px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+      .avatar-card {
+        top: 52px;
+        right: 12px;
+        bottom: auto;
+        width: 124px;
+        min-width: 124px;
+        border-radius: 22px;
+      }
+      .avatar-minimal { inset: 10px 10px 32px; }
+      .avatar-orb { width: 58px; height: 58px; }
+      .avatar-wave { bottom: 34px; gap: 4px; }
+      .avatar-wave span { width: 4px; height: 10px; }
+      .avatar-caption { font-size: 10px; bottom: 8px; }
       .panel {
-        min-height: auto;
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        height: auto;
+        min-height: 0;
+        display: block;
       }
+      .panel-card {
+        border-radius: 22px;
+        padding: 12px;
+        background: rgba(2, 6, 23, 0.62);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.42);
+      }
+      .panel-card.compact {
+        margin-top: 8px;
+        padding: 10px 12px;
+        background: rgba(2, 6, 23, 0.54);
+      }
+      .focus-stack { gap: 9px; }
+      .progress-meta { gap: 8px; }
+      .step-row { gap: 5px; }
+      .step-pill { width: 8px; height: 8px; }
       .current-step-title {
-        font-size: 24px;
+        font-size: clamp(19px, 5.4vw, 24px);
+      }
+      .status-chip {
+        padding: 6px 9px;
+        font-size: 12px;
+      }
+      .label {
+        margin-bottom: 4px;
+        font-size: 10px;
       }
       #assistant-text {
-        font-size: 18px;
-        min-height: 72px;
+        font-size: clamp(15px, 4.1vw, 18px);
+        line-height: 1.42;
+        min-height: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
+      #status-text, #transcript-text {
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      #transcript-text {
+        min-height: 44px;
+        max-height: 86px;
+        padding: 10px;
+      }
+      .hint { font-size: 12px; line-height: 1.45; }
+      #summary-screen { overflow: auto; align-items: flex-start; }
       #summary-card {
         padding: 16px;
+        margin: 12px 0;
       }
+    }
+    @media (max-height: 700px) and (max-width: 860px) {
+      .panel-card { padding: 10px; }
+      .panel-card.compact { padding: 8px 10px; }
+      .focus-stack { gap: 7px; }
+      #assistant-text { -webkit-line-clamp: 2; }
+      #transcript-text { max-height: 62px; }
     }
   </style>
 </head>
@@ -368,7 +614,15 @@
     <div class="card" id="interview-card">
       <div class="video-shell">
         <video id="local-video" autoplay playsinline muted></video>
+        <div class="video-gradient" aria-hidden="true"></div>
         <div class="video-badge" id="video-badge">摄像头准备中</div>
+        <div class="avatar-card" id="avatar-card" aria-label="极简动画 AI 面试官">
+          <div class="avatar-minimal" aria-hidden="true">
+            <div class="avatar-orb"></div>
+            <div class="avatar-wave"><span></span><span></span><span></span><span></span><span></span></div>
+          </div>
+          <div class="avatar-caption"><span>AI 面试官</span><span class="avatar-status-dot"></span></div>
+        </div>
         <canvas id="hidden-canvas"></canvas>
       </div>
       <div class="panel">
@@ -392,11 +646,9 @@
             </div>
           </div>
         </div>
-        <div class="panel-card compact">
-          <div class="actions">
-            <button id="finish-speech-btn" class="btn btn-secondary" style="display:none;">完成回答</button>
-            <span class="hint">只关注当前问题即可；回答结束后点击“完成回答”。</span>
-          </div>
+        <div class="panel-card compact auto-capture-panel">
+          <div class="capture-meter" aria-hidden="true"><div class="capture-meter-fill" id="capture-meter-fill"></div></div>
+          <span class="hint" id="auto-capture-hint">回答会被 Omni 实时接收；停顿后自动提交，无需点击按钮。</span>
         </div>
       </div>
     </div>
@@ -477,6 +729,10 @@
     ];
 
     const ACTION_DURATION_MS = 5000;
+    const AUTO_FINISH_MIN_TALK_MS = 1400;
+    const AUTO_FINISH_SILENCE_MS = 1800;
+    const AUTO_FINISH_MAX_MS = 26000;
+    const SPEECH_RMS_THRESHOLD = 0.014;
     const state = {
       ws: null,
       mediaStream: null,
@@ -489,6 +745,10 @@
       speechActive: false,
       speechTimer: null,
       speechDeadlineTimer: null,
+      speechSilenceTimer: null,
+      speechStartedAt: 0,
+      speechLastVoiceAt: 0,
+      speechHeardVoice: false,
       speechFrames: [],
       stepStartTimer: null,
       actionTimer: null,
@@ -500,13 +760,16 @@
       summary: '',
       finalEvaluation: null,
       lastAssistantText: '',
+      avatarMouthResetTimer: null,
     };
 
     const loginScreen = document.getElementById('login-screen');
     const interviewScreen = document.getElementById('interview-screen');
     const summaryScreen = document.getElementById('summary-screen');
     const startBtn = document.getElementById('start-btn');
-    const finishSpeechBtn = document.getElementById('finish-speech-btn');
+    const avatarCardEl = document.getElementById('avatar-card');
+    const captureMeterFillEl = document.getElementById('capture-meter-fill');
+    const autoCaptureHintEl = document.getElementById('auto-capture-hint');
     const assistantTextEl = document.getElementById('assistant-text');
     const statusTextEl = document.getElementById('status-text');
     const transcriptTextEl = document.getElementById('transcript-text');
@@ -521,7 +784,6 @@
     const globalLoadingTextEl = document.getElementById('global-loading-text');
 
     startBtn.addEventListener('click', startInterview);
-    finishSpeechBtn.addEventListener('click', finishSpeechCapture);
 
     function showScreen(name) {
       loginScreen.classList.toggle('active', name === 'login');
@@ -590,6 +852,7 @@
       state.micProcessor.onaudioprocess = function(event) {
         if (!state.speechActive || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
         const input = event.inputBuffer.getChannelData(0);
+        updateSpeechAutoFinish(input);
         const downsampled = downsampleBuffer(input, state.audioContext.sampleRate, 16000);
         if (!downsampled.length) return;
         const pcm = floatTo16BitPCM(downsampled);
@@ -760,8 +1023,14 @@
         window.clearTimeout(state.speechDeadlineTimer);
         state.speechDeadlineTimer = null;
       }
-      finishSpeechBtn.disabled = true;
-      finishSpeechBtn.style.display = 'none';
+      if (state.speechSilenceTimer) {
+        window.clearTimeout(state.speechSilenceTimer);
+        state.speechSilenceTimer = null;
+      }
+      state.speechStartedAt = 0;
+      state.speechLastVoiceAt = 0;
+      state.speechHeardVoice = false;
+      updateCaptureMeter(0);
     }
 
     function recordActionResult(status, label, message) {
@@ -777,13 +1046,19 @@
 
     function beginSpeechCapture(durationMs) {
       clearSpeechTimers();
+      const now = Date.now();
       state.speechActive = true;
+      state.speechStartedAt = now;
+      state.speechLastVoiceAt = now;
+      state.speechHeardVoice = false;
       state.speechFrames = [];
-      finishSpeechBtn.style.display = 'inline-flex';
-      finishSpeechBtn.disabled = false;
-      updateStatus('当前问题已开始，请回答后点击“完成回答”');
+      autoCaptureHintEl.textContent = '请直接回答；系统会根据语音停顿自动提交。';
+      updateStatus('当前问题已开始，请直接回答，停顿后自动进入下一步');
       captureSpeechFrame();
       state.speechTimer = window.setInterval(captureSpeechFrame, 1000);
+      state.speechDeadlineTimer = window.setTimeout(() => {
+        finishSpeechCapture('max-duration');
+      }, durationMs || AUTO_FINISH_MAX_MS);
     }
 
     function beginSpeechCaptureAfterPlayback() {
@@ -804,7 +1079,7 @@
       if (state.speechFrames.length > 4) state.speechFrames.shift();
     }
 
-    function finishSpeechCapture() {
+    function finishSpeechCapture(reason) {
       if (!state.speechActive) return;
       state.speechActive = false;
       if (state.speechTimer) {
@@ -815,8 +1090,14 @@
         window.clearTimeout(state.speechDeadlineTimer);
         state.speechDeadlineTimer = null;
       }
-      finishSpeechBtn.disabled = true;
-      finishSpeechBtn.style.display = 'none';
+      if (state.speechSilenceTimer) {
+        window.clearTimeout(state.speechSilenceTimer);
+        state.speechSilenceTimer = null;
+      }
+      updateCaptureMeter(0);
+      autoCaptureHintEl.textContent = reason === 'max-duration'
+        ? '已达到最长回答时间，正在自动提交。'
+        : '检测到回答停顿，正在自动提交。';
       updateStatus('回答结束，正在生成当前题判断');
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({
@@ -824,6 +1105,36 @@
           frames: state.speechFrames.slice(-3),
         }));
       }
+    }
+
+    function updateSpeechAutoFinish(samples) {
+      if (!state.speechActive) return;
+      let sum = 0;
+      for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
+      const rms = Math.sqrt(sum / Math.max(1, samples.length));
+      const level = Math.min(1, rms / 0.09);
+      updateCaptureMeter(level);
+      const now = Date.now();
+      if (rms >= SPEECH_RMS_THRESHOLD) {
+        state.speechHeardVoice = true;
+        state.speechLastVoiceAt = now;
+        autoCaptureHintEl.textContent = '正在接收回答...停顿后自动提交。';
+        if (state.speechSilenceTimer) {
+          window.clearTimeout(state.speechSilenceTimer);
+          state.speechSilenceTimer = null;
+        }
+        return;
+      }
+      const heardLongEnough = state.speechHeardVoice && (now - state.speechStartedAt >= AUTO_FINISH_MIN_TALK_MS);
+      const silentLongEnough = now - state.speechLastVoiceAt >= AUTO_FINISH_SILENCE_MS;
+      if (heardLongEnough && silentLongEnough && !state.speechSilenceTimer) {
+        state.speechSilenceTimer = window.setTimeout(() => finishSpeechCapture('silence'), 180);
+      }
+    }
+
+    function updateCaptureMeter(level) {
+      if (!captureMeterFillEl) return;
+      captureMeterFillEl.style.width = Math.round(Math.max(0, Math.min(1, level)) * 100) + '%';
     }
 
     async function captureFrames(count, delayMs) {
@@ -852,6 +1163,7 @@
     }
 
     function stopAssistantAudio() {
+      setAvatarSpeaking(false);
       state.playingSources.forEach((source) => {
         try {
           source.onended = null;
@@ -881,11 +1193,20 @@
       source.connect(state.audioContext.destination);
       source.onended = () => {
         state.playingSources.delete(source);
+        if (!state.playingSources.size) {
+          setAvatarSpeaking(false);
+        }
       };
       state.playingSources.add(source);
       const startAt = Math.max(state.audioContext.currentTime + 0.03, state.playbackTime || 0);
       source.start(startAt);
       state.playbackTime = startAt + audioBuffer.duration;
+      setAvatarSpeaking(true);
+    }
+
+    function setAvatarSpeaking(isSpeaking) {
+      if (!avatarCardEl) return;
+      avatarCardEl.classList.toggle('speaking', !!isSpeaking);
     }
 
     function renderSummary(report) {
@@ -939,7 +1260,6 @@
       globalLoadingTitleEl.textContent = title || 'AI 正在处理中';
       globalLoadingTextEl.textContent = text || '请稍候。';
       globalLoadingEl.classList.add('active');
-      finishSpeechBtn.disabled = true;
     }
 
     function hideGlobalLoading() {
