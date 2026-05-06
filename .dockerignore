@@ -1,0 +1,9 @@
+.git
+.omx
+node_modules
+logs
+npm-debug.log*
+.DS_Store
+Thumbs.db
+test
+*.md
