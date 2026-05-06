@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js && node --check scripts/replay-speech-eval.js && node --check lib/replay-speech-eval.js && node --check lib/courier-interview.js && node --check lib/omni-prompt.js && node --check lib/final-evaluation.js",
+    "test": "node --test",
+    "replay:speech": "node scripts/replay-speech-eval.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
