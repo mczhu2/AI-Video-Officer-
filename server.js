@@ -4,6 +4,21 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
+const {
+  INTERVIEW_STEPS,
+  parseCourierQuestionEvaluation,
+} = require('./lib/courier-interview');
+const {
+  buildFinalEvaluationInstructions,
+  parseFinalEvaluation,
+  hasStructuredFinalEvaluation,
+  buildFinalEvaluationFallback,
+} = require('./lib/final-evaluation');
+const {
+  buildStepPromptRequest,
+  buildRealtimeSessionConfig,
+  shouldForwardAssistantMedia,
+} = require('./lib/omni-prompt');
 
 const PORT = Number(process.env.PORT || 3000);
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || '';
@@ -13,51 +28,22 @@ const REALTIME_URL =
   '?model=' + encodeURIComponent(REALTIME_MODEL);
 const REALTIME_VOICE = process.env.DASHSCOPE_REALTIME_VOICE || 'Tina';
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const ACTION_DURATION_MS = 8000;
-const SPEECH_DURATION_MS = 35000;
+const LOG_DIR = path.join(__dirname, 'logs');
+const DEBUG_LOG_FILE = path.join(LOG_DIR, 'interview-debug.jsonl');
 const ACTION_EVAL_TIMEOUT_MS = 8000;
-
-const STEPS = [
-  {
-    id: 'left_hand',
-    type: 'action',
-    label: '举左手',
-    prompt: '你好，请举起左手并保持八秒。',
-    criteria: '左手需要明显抬起，至少高于腰部，最好接近肩部；不能只是轻微移动手臂。',
-    durationMs: ACTION_DURATION_MS,
-  },
-  {
-    id: 'right_hand',
-    type: 'action',
-    label: '举右手',
-    prompt: '你好，请举起右手并保持八秒。',
-    criteria: '右手需要明显抬起，至少高于腰部，最好接近肩部；不能只是轻微移动手臂。',
-    durationMs: ACTION_DURATION_MS,
-  },
-  {
-    id: 'turn_left',
-    type: 'action',
-    label: '左转',
-    prompt: '你好，请向左转头或微微转身，并保持八秒。',
-    criteria: '头部或上半身需要有清晰的左转姿态，能看出面部朝向或肩线明显偏向左侧。',
-    durationMs: ACTION_DURATION_MS,
-  },
-  {
-    id: 'turn_right',
-    type: 'action',
-    label: '右转',
-    prompt: '你好，请向右转头或微微转身，并保持八秒。',
-    criteria: '头部或上半身需要有清晰的右转姿态，能看出面部朝向或肩线明显偏向右侧。',
-    durationMs: ACTION_DURATION_MS,
-  },
-  {
-    id: 'speech',
-    type: 'speech',
-    label: '工作经历介绍',
-    prompt: '你好，请用三十五秒介绍你最近的一段工作经历，重点说目标、做法和结果。',
-    durationMs: SPEECH_DURATION_MS,
-  },
-];
+const SPEECH_TRANSCRIPT_TIMEOUT_MS = 4000;
+const QUESTION_SESSION_INSTRUCTIONS = [
+  '你是视频面试助手。',
+  '当系统通过单次 response 指令要求你播报问题时，你要像真实面试官一样自然说话。',
+  '除此之外，不要主动回答，不要主动评价，不要擅自继续追问。',
+  '候选人回答阶段只需要配合转写链路。',
+].join('\n');
+const SPEECH_TRANSCRIPTION_INSTRUCTIONS = [
+  '你是语音转写助手。',
+  '你的职责只是接收候选人的回答语音并产出转写事件。',
+  '不要主动回答，不要评价，不要播报任何额外内容。',
+].join('\n');
+const STEPS = INTERVIEW_STEPS;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -80,6 +66,38 @@ function sendJson(res, statusCode, payload) {
     'Access-Control-Allow-Origin': '*',
   });
   res.end(JSON.stringify(payload));
+}
+
+function ensureLogDir() {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  if (!fs.existsSync(DEBUG_LOG_FILE)) {
+    fs.writeFileSync(DEBUG_LOG_FILE, '', 'utf8');
+  }
+}
+
+function appendDebugLog(level, module, event, payload) {
+  try {
+    ensureLogDir();
+    const record = {
+      timestamp: new Date().toISOString(),
+      level,
+      module,
+      event,
+      payload,
+    };
+    fs.appendFileSync(DEBUG_LOG_FILE, JSON.stringify(record) + '\n', 'utf8');
+  } catch (err) {
+    console.error('[DEBUG_LOG] 写入失败:', err.message || err);
+  }
+}
+
+function logInterviewEvent(session, event, payload) {
+  appendDebugLog('INFO', 'InterviewSession', event, Object.assign({
+    sessionId: session.id,
+    phase: session.phase,
+    stepIndex: session.stepIndex,
+    stepId: currentStep(session) ? currentStep(session).id : null,
+  }, payload || {}));
 }
 
 function readStaticFile(filePath, res) {
@@ -127,6 +145,14 @@ function currentStep(session) {
   return STEPS[session.stepIndex] || null;
 }
 
+function isQuestionStep(step) {
+  return !!step && step.type === 'question';
+}
+
+function getCurrentTranscriptText(session) {
+  return (session.currentQuestionTranscripts || []).join('\n').trim();
+}
+
 function getStepDurationSeconds(step) {
   return Math.round(((step && step.durationMs) || 0) / 1000);
 }
@@ -134,10 +160,8 @@ function getStepDurationSeconds(step) {
 function buildInstructions(session, mode) {
   const step = currentStep(session);
   const base = [
-    '你是 OpenClaw 的实时视频面试官。',
+    '你是视频面试助手。',
     '你只能基于当前收到的音频和图像作出判断，不要假设看不到的信息。',
-    '你可以判断动作是否完成、表达是否清晰、整体配合度如何，但不要做医疗诊断。',
-    '你说话要简短、自然、像实时语音助手。',
   ];
 
   if (!step) {
@@ -147,41 +171,39 @@ function buildInstructions(session, mode) {
     ]).join('\n');
   }
 
-  if (mode === 'prompt') {
-    return base.concat([
-      '当前步骤：' + step.label + '。',
-      '请直接发出一句口令，必须以“你好，”开头。',
-      '不要提候选人姓名。',
-      '动作步骤只说当前动作和固定时长，不要解释后续流程。',
-      '发言步骤只说当前发言要求和固定时长。',
-      '尽量贴近这句口令：' + step.prompt,
-    ]).join('\n');
-  }
-
   if (mode === 'evaluate_action') {
     return base.concat([
       '当前步骤：' + step.label + '。',
       '你会收到候选人在固定 ' + getStepDurationSeconds(step) + ' 秒动作窗口结束时的连续图像帧。',
       '动作达标标准：' + (step.criteria || '动作需要清楚、完整、可辨认。'),
       '你的任务是判断这个动作是否已经完成。',
-      '只输出一句中文短句，并且必须以“通过：”或“未通过：”开头。',
-      '如果未通过，只指出动作没有达成，不要继续指导第二次尝试。',
+      '只输出一句中文短句，并且必须以"健康："或"异常："开头。',
+      '如果动作完成，写"健康：动作正常，无异常。"',
+      '如果动作未完成，写"异常：动作未完成或不规范。"',
     ]).join('\n');
   }
 
+  const transcriptText = getCurrentTranscriptText(session);
+
   return base.concat([
     '当前步骤：' + step.label + '。',
-    '你会收到候选人的一段工作经历自述音频和最近的视频帧。',
-    '请直接输出最终面试结果。',
-    '输出必须严格使用两行格式：',
-    '总结：一句话总评。',
-    '点评：一句话点评候选人的工作经历表达是否清晰、是否抓住目标、做法、结果。',
-    '总长度控制在一百五十字以内。',
+    '你现在要评估的是快递员岗位问答，不要把它当作动作检测任务。',
+    '面试问题：' + step.prompt,
+    '候选人回答转写：' + (transcriptText || '（暂未获取到有效转写，请仅根据可见内容谨慎总结）'),
+    '请判断这段回答是否具体、是否体现快递员岗位经验或处理思路。',
+    '严禁输出“健康：”“异常：”“通过：”“未通过：”“动作正常”或“内容异常”这类动作判断结论。',
+    '即使候选人内容很少、经历不清楚，也必须输出结构化评估，而不是输出异常标签。',
+    '请严格按照以下三行格式输出，不要增加任何别的行：',
+    '概述：一句话概括候选人回答了什么。',
+    '判断：基于回答内容判断经验、效率或处理思路是否具体。',
+    '风险：指出还缺什么关键信息，或者需要继续追问的点。',
   ]).join('\n');
 }
 
 function parseActionVerdict(text) {
   const normalized = String(text || '').trim();
+  if (/^健康[:：]/.test(normalized)) return 'pass';
+  if (/^异常[:：]/.test(normalized)) return 'fail';
   if (/^通过[:：]/.test(normalized)) return 'pass';
   if (/^未通过[:：]/.test(normalized)) return 'fail';
   return 'unknown';
@@ -194,15 +216,316 @@ function clearActionEvalTimer(session) {
   }
 }
 
-function parseSpeechSummary(text) {
-  const raw = String(text || '').trim();
-  const summaryMatch = raw.match(/总结[:：]\s*([\s\S]*?)(?:\n点评[:：]|$)/);
-  const commentMatch = raw.match(/点评[:：]\s*([\s\S]*)$/);
-  return {
-    summary: summaryMatch ? summaryMatch[1].trim() : raw,
-    speechComment: commentMatch ? commentMatch[1].trim() : '',
-    raw,
+function clearSpeechTranscriptTimer(session) {
+  if (session.speechTranscriptTimer) {
+    clearTimeout(session.speechTranscriptTimer);
+    session.speechTranscriptTimer = null;
+  }
+}
+
+function completeFinalEvaluation(session, parsed, rawTranscript) {
+  logInterviewEvent(session, 'final.evaluate.response', {
+    rawTranscript,
+    parsed,
+    questionEvaluationCount: session.report.questionEvaluations.length,
+  });
+  session.report.finalEvaluation = parsed;
+  session.phase = 'complete';
+  session.acceptUserTranscript = false;
+  sendBrowser(session, 'interview.complete', {
+    report: session.report,
+    summary: parsed.summary || '',
+    finalEvaluation: parsed,
+  });
+}
+
+function completeQuestionEvaluation(session, parsed, rawTranscript) {
+  logInterviewEvent(session, 'question.evaluate.response', {
+    rawTranscript,
+    parsed,
+    userTranscripts: (session.currentQuestionTranscripts || []).slice(),
+  });
+  session.report.questionEvaluations.push(parsed);
+  session.phase = 'idle';
+  session.acceptUserTranscript = false;
+  session.stepIndex += 1;
+  setTimeout(() => {
+    try {
+      promptCurrentStep(session);
+    } catch (err) {
+      sendBrowser(session, 'error', { message: err.message });
+    }
+  }, 500);
+}
+
+function runIsolatedSpeechEvaluation(session, instructions) {
+  const evaluationSocket = new WebSocket(REALTIME_URL, {
+    headers: {
+      Authorization: 'Bearer ' + DASHSCOPE_API_KEY,
+    },
+  });
+
+  session.speechEvalSocket = evaluationSocket;
+  let assistantTranscript = '';
+  let finished = false;
+
+  const finish = (rawTranscript) => {
+    if (finished) return;
+    finished = true;
+    session.speechEvalSocket = null;
+    const step = currentStep(session);
+    const transcriptText = getCurrentTranscriptText(session);
+    const parsed = parseCourierQuestionEvaluation(rawTranscript, step, transcriptText);
+    console.log('[QUESTION_EVAL] Raw transcript:', rawTranscript);
+    console.log('[QUESTION_EVAL] Parsed:', parsed);
+    completeQuestionEvaluation(session, parsed, rawTranscript);
+    try {
+      evaluationSocket.close(1000, 'speech evaluation complete');
+    } catch (err) {
+    }
   };
+
+  evaluationSocket.on('open', () => {
+    const send = (payload) => {
+      evaluationSocket.send(JSON.stringify(Object.assign({ event_id: makeEventId('evt') }, payload)));
+    };
+    send({
+      type: 'session.update',
+      session: {
+        modalities: ['text', 'audio'],
+        voice: REALTIME_VOICE,
+        input_audio_format: 'pcm',
+        output_audio_format: 'pcm',
+        turn_detection: null,
+        temperature: 0.25,
+        max_tokens: 320,
+        instructions,
+      },
+    });
+    session.pendingSpeechFrames.forEach((image) => {
+      if (image) {
+        send({ type: 'input_image_buffer.append', image });
+      }
+    });
+    send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [
+            {
+              type: 'input_text',
+              text: '面试问题：' + ((currentStep(session) && currentStep(session).prompt) || '（未知问题）') + '\n候选人回答转写：' + (getCurrentTranscriptText(session) || '（无有效转写）'),
+            },
+          ],
+        },
+    });
+    send({ type: 'response.create' });
+  });
+
+  evaluationSocket.on('message', (raw) => {
+    let message;
+    try {
+      message = JSON.parse(String(raw));
+    } catch (err) {
+      return;
+    }
+
+    if (message.type === 'response.audio_transcript.delta') {
+      assistantTranscript += message.delta || '';
+      sendBrowser(session, 'assistant.text.delta', { delta: message.delta || '' });
+      return;
+    }
+
+    if (message.type === 'response.audio_transcript.done') {
+      assistantTranscript = String(message.transcript || assistantTranscript || '').trim();
+      sendBrowser(session, 'assistant.text.done', { text: assistantTranscript });
+      return;
+    }
+
+    if (message.type === 'response.done') {
+      finish(String(assistantTranscript || '').trim());
+      return;
+    }
+
+    if (message.type === 'error') {
+      finish('');
+    }
+  });
+
+  evaluationSocket.on('close', () => {
+    if (!finished) {
+      finish(String(assistantTranscript || '').trim());
+    }
+  });
+
+  evaluationSocket.on('error', () => {
+    finish('');
+  });
+}
+
+function runIsolatedFinalEvaluation(session, instructions) {
+  const evaluationSocket = new WebSocket(REALTIME_URL, {
+    headers: {
+      Authorization: 'Bearer ' + DASHSCOPE_API_KEY,
+    },
+  });
+
+  session.finalEvalSocket = evaluationSocket;
+  let assistantTranscript = '';
+  let finished = false;
+
+  const finish = (rawTranscript) => {
+    if (finished) return;
+    finished = true;
+    session.finalEvalSocket = null;
+    const parsed = parseFinalEvaluation(rawTranscript);
+    const finalResult = hasStructuredFinalEvaluation(parsed)
+      ? parsed
+      : buildFinalEvaluationFallback(session.report, rawTranscript);
+    console.log('[FINAL_EVAL] Raw transcript:', rawTranscript);
+    console.log('[FINAL_EVAL] Parsed:', finalResult);
+    completeFinalEvaluation(session, finalResult, rawTranscript);
+    try {
+      evaluationSocket.close(1000, 'final evaluation complete');
+    } catch (err) {
+    }
+  };
+
+  evaluationSocket.on('open', () => {
+    const send = (payload) => {
+      evaluationSocket.send(JSON.stringify(Object.assign({ event_id: makeEventId('evt') }, payload)));
+    };
+    send({
+      type: 'session.update',
+      session: {
+        modalities: ['text', 'audio'],
+        voice: REALTIME_VOICE,
+        input_audio_format: 'pcm',
+        output_audio_format: 'pcm',
+        turn_detection: null,
+        temperature: 0.2,
+        max_tokens: 480,
+        instructions: '你是快递员岗位终面评估官，请严格输出结构化最终结论。',
+      },
+    });
+    send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: instructions,
+          },
+        ],
+      },
+    });
+    send({ type: 'response.create' });
+  });
+
+  evaluationSocket.on('message', (raw) => {
+    let message;
+    try {
+      message = JSON.parse(String(raw));
+    } catch (err) {
+      return;
+    }
+
+    if (message.type === 'response.audio_transcript.delta') {
+      assistantTranscript += message.delta || '';
+      return;
+    }
+
+    if (message.type === 'response.audio_transcript.done') {
+      assistantTranscript = String(message.transcript || assistantTranscript || '').trim();
+      return;
+    }
+
+    if (message.type === 'response.done') {
+      finish(String(assistantTranscript || '').trim());
+      return;
+    }
+
+    if (message.type === 'error') {
+      finish('');
+    }
+  });
+
+  evaluationSocket.on('close', () => {
+    if (!finished) {
+      finish(String(assistantTranscript || '').trim());
+    }
+  });
+
+  evaluationSocket.on('error', () => {
+    finish('');
+  });
+}
+
+function requestFinalEvaluation(session) {
+  if (session.finalEvaluationRequested) return;
+  session.finalEvaluationRequested = true;
+  session.phase = 'final_eval';
+  session.acceptUserTranscript = false;
+  sendBrowser(session, 'final.evaluation.pending', {
+    report: {
+      actions: session.report.actions,
+      questionEvaluations: session.report.questionEvaluations,
+    },
+  });
+  const instructions = buildFinalEvaluationInstructions(session.report);
+  logInterviewEvent(session, 'final.evaluate.request', {
+    instructions,
+    actionCount: session.report.actions.length,
+    questionEvaluationCount: session.report.questionEvaluations.length,
+  });
+  runIsolatedFinalEvaluation(session, instructions);
+}
+
+function requestSpeechEvaluation(session) {
+  const step = currentStep(session);
+  if (!step || !isQuestionStep(step) || session.speechEvaluationRequested) return;
+
+  clearSpeechTranscriptTimer(session);
+  session.phase = 'question_eval';
+  session.lastAssistantTranscript = '';
+  session.acceptUserTranscript = false;
+  session.speechEvaluationRequested = true;
+
+  const instructions = buildInstructions(session, 'evaluate_speech');
+  logInterviewEvent(session, 'question.evaluate.request', {
+    stepLabel: step.label,
+    instructions,
+    transcriptCount: (session.currentQuestionTranscripts || []).length,
+    transcripts: (session.currentQuestionTranscripts || []).slice(),
+    frameCount: session.pendingSpeechFrames.length,
+    frames: session.pendingSpeechFrames.slice(),
+  });
+  runIsolatedSpeechEvaluation(session, instructions);
+}
+
+function beginStepPrompt(session, step) {
+  const promptRequest = buildStepPromptRequest(step);
+  session.phase = step.type === 'action' ? 'action_prompting' : 'question_prompting';
+  session.lastAssistantTranscript = '';
+  session.acceptUserTranscript = false;
+  logInterviewEvent(session, 'step.prompt.request', {
+    stepId: step.id,
+    stepLabel: step.label,
+    stepType: step.type,
+    promptText: step.prompt,
+    responseInstructions: promptRequest.response.instructions,
+  });
+  sendUpstream(session, {
+    type: 'conversation.item.create',
+    item: promptRequest.item,
+  });
+  sendUpstream(session, {
+    type: 'response.create',
+    response: promptRequest.response,
+  });
 }
 
 function advanceAfterAction(session, status, note) {
@@ -235,43 +558,39 @@ function advanceAfterAction(session, status, note) {
 function promptCurrentStep(session) {
   const step = currentStep(session);
   if (!step) {
-    session.phase = 'complete';
-    session.acceptUserTranscript = false;
-    sendBrowser(session, 'interview.complete', {
-      report: session.report,
-      summary: session.report.summary || '',
-      speechComment: session.report.speechComment || '',
-    });
+    requestFinalEvaluation(session);
     return;
   }
 
-  session.phase = step.type === 'action' ? 'action_prompt' : 'speech_prompt';
+  session.phase = step.type === 'action' ? 'action_prompting' : 'question_prompting';
   session.lastAssistantTranscript = '';
+  session.acceptUserTranscript = false;
+  if (isQuestionStep(step)) {
+    session.currentQuestionTranscripts = [];
+    session.pendingSpeechFrames = [];
+    session.speechChunkIndex = 0;
+    session.speechEvaluationRequested = false;
+  }
+  logInterviewEvent(session, 'step.prompt', {
+    stepLabel: step.label,
+    stepType: step.type,
+    promptText: step.prompt,
+  });
   sendBrowser(session, 'stage.changed', {
     stepIndex: session.stepIndex,
     step,
-  });
-  sendUpstream(session, {
-    type: 'session.update',
-    session: {
-      modalities: ['text', 'audio'],
-      voice: REALTIME_VOICE,
-      input_audio_format: 'pcm',
-      output_audio_format: 'pcm',
-      turn_detection: null,
-      input_audio_transcription: { model: 'gummy-realtime-v1' },
-      temperature: 0.25,
-      max_tokens: 220,
-      instructions: buildInstructions(session, 'prompt'),
-    },
+    promptText: step.prompt,
   });
   sendUpstream(session, { type: 'input_audio_buffer.clear' });
   sendUpstream(session, {
-    type: 'input_audio_buffer.append',
-    audio: buildSilenceBase64(240),
+    type: 'session.update',
+    session: buildRealtimeSessionConfig({
+      voice: REALTIME_VOICE,
+      maxTokens: 160,
+      instructions: QUESTION_SESSION_INSTRUCTIONS,
+    }),
   });
-  sendUpstream(session, { type: 'input_audio_buffer.commit' });
-  sendUpstream(session, { type: 'response.create' });
+  beginStepPrompt(session, step);
 }
 
 function evaluateAction(session, frames) {
@@ -282,6 +601,12 @@ function evaluateAction(session, frames) {
   session.phase = 'action_eval';
   session.lastAssistantTranscript = '';
   session.acceptUserTranscript = false;
+  const instructions = buildInstructions(session, 'evaluate_action');
+  logInterviewEvent(session, 'action.evaluate.request', {
+    stepLabel: step.label,
+    instructions,
+    frameCount: Array.isArray(frames) ? frames.length : 0,
+  });
   sendUpstream(session, { type: 'input_audio_buffer.clear' });
   sendUpstream(session, {
     type: 'session.update',
@@ -294,7 +619,7 @@ function evaluateAction(session, frames) {
       input_audio_transcription: { model: 'gummy-realtime-v1' },
       temperature: 0.2,
       max_tokens: 160,
-      instructions: buildInstructions(session, 'evaluate_action'),
+      instructions,
     },
   });
   sendUpstream(session, {
@@ -319,45 +644,33 @@ function evaluateAction(session, frames) {
 
 function finishSpeech(session, frames) {
   const step = currentStep(session);
-  if (!step || step.type !== 'speech') return;
+  if (!step || !isQuestionStep(step)) return;
 
-  session.phase = 'speech_eval';
+  session.phase = 'question_transcribing';
   session.lastAssistantTranscript = '';
-  sendUpstream(session, {
-    type: 'session.update',
-    session: {
-      modalities: ['text', 'audio'],
-      voice: REALTIME_VOICE,
-      input_audio_format: 'pcm',
-      output_audio_format: 'pcm',
-      turn_detection: null,
-      input_audio_transcription: { model: 'gummy-realtime-v1' },
-      temperature: 0.25,
-      max_tokens: 320,
-      instructions: buildInstructions(session, 'evaluate_speech'),
-    },
-  });
-  (frames || []).forEach((frame) => {
-    const image = stripDataUrlPrefix(frame);
-    if (image) {
-      sendUpstream(session, { type: 'input_image_buffer.append', image });
-    }
+  session.pendingSpeechFrames = Array.isArray(frames)
+    ? frames.slice(0, 4).map((frame) => stripDataUrlPrefix(frame)).filter(Boolean)
+    : [];
+  session.speechEvaluationRequested = false;
+  logInterviewEvent(session, 'question.transcription.await', {
+    stepLabel: step.label,
+    chunkCount: session.speechChunkIndex,
+    frameCount: session.pendingSpeechFrames.length,
   });
   sendUpstream(session, { type: 'input_audio_buffer.commit' });
-  sendUpstream(session, { type: 'response.create' });
+  clearSpeechTranscriptTimer(session);
+  session.speechTranscriptTimer = setTimeout(() => {
+    if (session.phase === 'question_transcribing' && !session.speechEvaluationRequested) {
+      logInterviewEvent(session, 'question.transcription.timeout', {
+        transcriptCount: (session.currentQuestionTranscripts || []).length,
+      });
+      requestSpeechEvaluation(session);
+    }
+  }, SPEECH_TRANSCRIPT_TIMEOUT_MS);
 }
 
 function handleAssistantDone(session) {
-  const step = currentStep(session);
   const transcript = String(session.lastAssistantTranscript || '').trim();
-
-  if (session.phase === 'action_prompt') {
-    sendBrowser(session, 'action.capture.start', {
-      step,
-      durationMs: (step && step.durationMs) || ACTION_DURATION_MS,
-    });
-    return;
-  }
 
   if (session.phase === 'action_eval') {
     const verdict = parseActionVerdict(transcript);
@@ -373,32 +686,48 @@ function handleAssistantDone(session) {
     return;
   }
 
-  if (session.phase === 'speech_prompt') {
-    session.acceptUserTranscript = true;
-    sendBrowser(session, 'speech.capture.start', {
+  if (session.phase === 'question_eval') {
+    return;
+  }
+
+  if (session.phase === 'final_eval') {
+    return;
+  }
+
+  if (session.phase === 'action_prompting') {
+    const step = currentStep(session);
+    if (!step) return;
+    session.phase = 'action_ready';
+    sendBrowser(session, 'action.window.start', {
+      stepIndex: session.stepIndex,
       step,
-      durationMs: (step && step.durationMs) || SPEECH_DURATION_MS,
     });
     return;
   }
 
-  if (session.phase === 'speech_eval') {
-    const parsed = parseSpeechSummary(transcript);
-    session.report.summary = parsed.summary;
-    session.report.speechComment = parsed.speechComment;
-    session.phase = 'complete';
-    session.acceptUserTranscript = false;
-    session.stepIndex += 1;
-    sendBrowser(session, 'interview.complete', {
-      report: session.report,
-      summary: parsed.summary,
-      speechComment: parsed.speechComment,
+  if (session.phase === 'question_prompting') {
+    const step = currentStep(session);
+    if (!step) return;
+    session.phase = 'question_ready';
+    session.acceptUserTranscript = true;
+    sendUpstream(session, {
+      type: 'session.update',
+      session: buildRealtimeSessionConfig({
+        voice: REALTIME_VOICE,
+        maxTokens: 160,
+        instructions: SPEECH_TRANSCRIPTION_INSTRUCTIONS,
+      }),
+    });
+    sendBrowser(session, 'question.capture.start', {
+      stepIndex: session.stepIndex,
+      step,
     });
   }
 }
 
 function createSession(browser) {
   return {
+    id: makeEventId('session'),
     browser,
     upstream: null,
     stepIndex: 0,
@@ -408,17 +737,44 @@ function createSession(browser) {
     lastAssistantTranscript: '',
     report: {
       actions: [],
-      transcripts: [],
-      summary: '',
-      speechComment: '',
+      questionEvaluations: [],
+      finalEvaluation: {
+        healthConclusion: '',
+        experienceConclusion: '',
+        deliveryCapacity: '',
+        exceptionHandling: '',
+        serviceAwareness: '',
+        recommendation: '',
+        summary: '',
+        raw: '',
+      },
     },
+    currentQuestionTranscripts: [],
+    pendingSpeechFrames: [],
+    speechChunkIndex: 0,
+    speechTranscriptTimer: null,
+    speechEvaluationRequested: false,
+    speechEvalSocket: null,
+    finalEvaluationRequested: false,
+    finalEvalSocket: null,
   };
 }
 
 function closeSession(session) {
   clearActionEvalTimer(session);
+  clearSpeechTranscriptTimer(session);
+  logInterviewEvent(session, 'session.closed', {
+    actionCount: session.report.actions.length,
+    questionEvaluationCount: session.report.questionEvaluations.length,
+  });
   if (session.upstream && session.upstream.readyState === WebSocket.OPEN) {
     session.upstream.close(1000, 'browser closed');
+  }
+  if (session.speechEvalSocket && session.speechEvalSocket.readyState === WebSocket.OPEN) {
+    session.speechEvalSocket.close(1000, 'browser closed');
+  }
+  if (session.finalEvalSocket && session.finalEvalSocket.readyState === WebSocket.OPEN) {
+    session.finalEvalSocket.close(1000, 'browser closed');
   }
 }
 
@@ -435,6 +791,10 @@ function connectUpstream(session) {
   });
 
   session.upstream.on('open', () => {
+    logInterviewEvent(session, 'upstream.open', {
+      model: REALTIME_MODEL,
+      voice: REALTIME_VOICE,
+    });
     sendBrowser(session, 'backend.ready', {
       model: REALTIME_MODEL,
       voice: REALTIME_VOICE,
@@ -456,27 +816,47 @@ function connectUpstream(session) {
     }
 
     if (message.type === 'response.audio.delta') {
-      sendBrowser(session, 'assistant.audio.delta', { delta: message.delta });
+      if (shouldForwardAssistantMedia(session.phase)) {
+        sendBrowser(session, 'assistant.audio.delta', { delta: message.delta });
+      }
       return;
     }
 
     if (message.type === 'response.audio_transcript.delta') {
       session.lastAssistantTranscript += message.delta || '';
-      sendBrowser(session, 'assistant.text.delta', { delta: message.delta || '' });
+      if (shouldForwardAssistantMedia(session.phase)) {
+        sendBrowser(session, 'assistant.text.delta', { delta: message.delta || '' });
+      }
       return;
     }
 
     if (message.type === 'response.audio_transcript.done') {
       session.lastAssistantTranscript = String(message.transcript || session.lastAssistantTranscript || '').trim();
-      sendBrowser(session, 'assistant.text.done', { text: session.lastAssistantTranscript });
+      logInterviewEvent(session, 'assistant.transcript.done', {
+        transcript: session.lastAssistantTranscript,
+      });
+      if (shouldForwardAssistantMedia(session.phase)) {
+        sendBrowser(session, 'assistant.text.done', { text: session.lastAssistantTranscript });
+      }
       return;
     }
 
     if (message.type === 'conversation.item.input_audio_transcription.completed') {
       const text = String(message.transcript || '').trim();
       if (text && session.acceptUserTranscript) {
-        session.report.transcripts.push(text);
-        sendBrowser(session, 'user.transcript', { text });
+        session.currentQuestionTranscripts.push(text);
+        logInterviewEvent(session, 'user.transcript.completed', {
+          transcriptIndex: session.currentQuestionTranscripts.length - 1,
+          stepId: currentStep(session) ? currentStep(session).id : '',
+          transcript: text,
+        });
+        sendBrowser(session, 'user.transcript', {
+          stepId: currentStep(session) ? currentStep(session).id : '',
+          text,
+        });
+        if (session.phase === 'question_transcribing' && !session.speechEvaluationRequested) {
+          requestSpeechEvaluation(session);
+        }
       }
       return;
     }
@@ -545,6 +925,7 @@ wss.on('connection', (browser) => {
 
     try {
       if (message.type === 'session.start') {
+        logInterviewEvent(session, 'session.start', {});
         connectUpstream(session);
         return;
       }
@@ -555,7 +936,17 @@ wss.on('connection', (browser) => {
       }
 
       if (message.type === 'speech.audio_chunk') {
-        if (session.upstream && session.upstream.readyState === WebSocket.OPEN && message.audio) {
+        if (
+          session.upstream &&
+          session.upstream.readyState === WebSocket.OPEN &&
+          message.audio &&
+          (session.phase === 'question_ready' || session.phase === 'question_transcribing')
+        ) {
+          logInterviewEvent(session, 'question.audio_chunk', {
+            chunkIndex: session.speechChunkIndex,
+            audioBase64: String(message.audio),
+          });
+          session.speechChunkIndex += 1;
           sendUpstream(session, {
             type: 'input_audio_buffer.append',
             audio: String(message.audio),
@@ -565,7 +956,13 @@ wss.on('connection', (browser) => {
       }
 
       if (message.type === 'speech.finish') {
+        logInterviewEvent(session, 'question.finish', {
+          frameCount: Array.isArray(message.frames) ? message.frames.length : 0,
+          frames: Array.isArray(message.frames) ? message.frames.map((frame) => stripDataUrlPrefix(frame)) : [],
+          chunkCount: session.speechChunkIndex,
+        });
         finishSpeech(session, Array.isArray(message.frames) ? message.frames.slice(0, 4) : []);
+        return;
       }
     } catch (err) {
       sendBrowser(session, 'error', { message: err.message });
@@ -588,6 +985,8 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
+  ensureLogDir();
   console.log('Omni interview backend listening on http://0.0.0.0:' + PORT);
   console.log('Realtime proxy path: ws://0.0.0.0:' + PORT + '/api/realtime');
+  console.log('Interview debug log file: ' + DEBUG_LOG_FILE);
 });
