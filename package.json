@@ -6,8 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check scripts/replay-speech-eval.js && node --check lib/replay-speech-eval.js && node --check lib/courier-interview.js && node --check lib/omni-prompt.js && node --check lib/final-evaluation.js && node --check lib/transcription-utils.js && node --check scripts/check-public-html.js && node scripts/check-public-html.js",
+    "check": "node --check server.js && node --check scripts/replay-speech-eval.js && node --check scripts/generate-douyin-cross-time-video.js && node --check lib/replay-speech-eval.js && node --check lib/courier-interview.js && node --check lib/omni-prompt.js && node --check lib/final-evaluation.js && node --check lib/transcription-utils.js && node --check scripts/check-public-html.js && node scripts/check-public-html.js",
     "test": "node --test",
+    "douyin:video-prompt": "node scripts/generate-douyin-cross-time-video.js",
     "replay:speech": "node scripts/replay-speech-eval.js"
   },
   "dependencies": {
