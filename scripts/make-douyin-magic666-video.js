@@ -6,6 +6,16 @@ const { execFileSync } = require('child_process');
 
 loadEnvFile(path.join(process.cwd(), '.env.magic666'));
 loadEnvFile(path.join(process.cwd(), '.env.minimax'));
+applyDefaultEnv({
+  // 临时短期 provider key：保留真实环境变量/.env 的优先级，方便 key 过期后用外部配置覆盖。
+  MAGIC666_AUTH: 'Bearer sk-XUStFu53nfE36XtxR58ibRzcVf6n1pM638C0SeIfGikqgfE6',
+  MINIMAX_API_KEY: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiLmtbfonrrnlKjmiLdfNDQyNTE2NDY0MDQxMDEzMjQ5IiwiVXNlck5hbWUiOiLmtbfonrrnlKjmiLdfNDQyNTE2NDY0MDQxMDEzMjQ5IiwiQWNjb3VudCI6IiIsIlN1YmplY3RJRCI6IjE5ODYwNjQ1OTYxMjA2Mzc1NDgiLCJQaG9uZSI6IjE1NTU2NTMxNTk5IiwiR3JvdXBJRCI6IjE5ODYwNjQ1OTYxMTY0NDMyNDQiLCJQYWdlTmFtZSI6IiIsIk1haWwiOiIiLCJDcmVhdGVUaW1lIjoiMjAyNS0xMS0wNiAwMDozMTozNSIsIlRva2VuVHlwZSI6MiwiaXNzIjoibWluaW1heCJ9.ZbNKWSr2gdxKI9E-_aOVpM5CgI1OLivOCzg_D0aBkmN0WGxoYHCdJKgYhE8a69oxtYlpDaLw7x_GDEXbKr0kADpCmBzQvvGn78Vqj12rYns_V7YoY9YPVILdXfZuTLRty2bIbE3fvROqYh0yWCs48OGkQbeuEeocU9lEWZKiHPtFtLJBXaOhQOlSJ-BCAh6lzszFWbu0XV-LySNDqj0NADZ4SPMrWpuoX7rk9PUpFj7yAkKMq-Q-dawvj15Rp_Ro3kZqd5QvA5NHI5CKkMxBgyaQT3QgZDPJR51u-QoJUlHOn-6Gbe4-2kyf1xp7Q5BKJtb2X3AYlZh8mDRByDMePw',
+  MINIMAX_GROUP_ID: '1986064596116443244',
+  MINIMAX_TTS_MODEL: 'speech-2.8-turbo',
+  MINIMAX_VOICE_ID: 'male-qn-jingying',
+  MINIMAX_SPEED: '0.96',
+  MINIMAX_PITCH: '-1',
+});
 
 const API_BASE = process.env.MAGIC666_BASE_URL || 'https://api.magic666.top/v1';
 const IMAGE_MODEL = process.env.MAGIC666_IMAGE_MODEL || 'gpt-image-2-pro';
@@ -45,6 +55,12 @@ function loadEnvFile(filePath) {
       value = value.slice(1, -1);
     }
     if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+function applyDefaultEnv(defaults) {
+  for (const [key, value] of Object.entries(defaults)) {
+    if (process.env[key] === undefined) process.env[key] = value;
   }
 }
 
