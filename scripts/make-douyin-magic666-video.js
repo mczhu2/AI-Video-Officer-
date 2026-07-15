@@ -8,7 +8,7 @@ loadEnvFile(path.join(process.cwd(), '.env.magic666'));
 loadEnvFile(path.join(process.cwd(), '.env.minimax'));
 
 const API_BASE = process.env.MAGIC666_BASE_URL || 'https://api.magic666.top/v1';
-const IMAGE_MODEL = 'gpt-image-2';
+const IMAGE_MODEL = process.env.MAGIC666_IMAGE_MODEL || 'gpt-image-2-pro';
 const VIDEO_MODEL = process.env.MAGIC666_VIDEO_MODEL || 'grok-video-3-pro';
 const VOICE_MODEL = process.env.MAGIC666_VOICE_MODEL || 'gpt-4o-realtime-preview';
 const MINIMAX_BASE_URL = process.env.MINIMAX_BASE_URL || 'https://api.minimaxi.com/v1';
@@ -65,6 +65,22 @@ function toSpeechText(text) {
     .join(' ');
 }
 
+function estimateMandarinSpeechSeconds(text) {
+  const normalized = toSpeechText(text);
+  const spokenUnits = Array.from(normalized).filter((char) => /[\u3400-\u9fffA-Za-z0-9]/.test(char)).length;
+  const minorPauses = (normalized.match(/[，、；：]/g) || []).length * 0.18;
+  const majorPauses = (normalized.match(/[。！？!?]/g) || []).length * 0.35;
+  const normalReadingSeconds = spokenUnits / 4.4 + minorPauses + majorPauses;
+  // 人物段口播要按正常中文语速完整说完，并在开头/结尾各留 0.5 秒呼吸和表情收束。
+  return Math.min(12, Math.max(5, Math.ceil(normalReadingSeconds + 1)));
+}
+
+function estimateSceneSeconds(scene) {
+  const override = Number(readArg('--video-seconds') || process.env.DOUYIN_VIDEO_SECONDS || 0);
+  if (Number.isFinite(override) && override > 0) return Math.max(1, Math.ceil(override));
+  return estimateMandarinSpeechSeconds(scene.line || '');
+}
+
 function usage() {
   return [
     'Usage:',
@@ -79,7 +95,10 @@ function usage() {
     '  node scripts/make-douyin-magic666-video.js --theme=离职幻想 --preview-grok-video',
     '  node scripts/make-douyin-magic666-video.js --theme=离职幻想 --inspect-grok-video',
     '  node scripts/make-douyin-magic666-video.js --theme=离职幻想 --images-only --only-scene=tao-yuanming',
+    '  node scripts/make-douyin-magic666-video.js --theme=存钱幻想 --images-only --only-scene=cover',
+    '  node scripts/make-douyin-magic666-video.js --theme=存钱幻想 --images-only --only-scene=ending',
     '  node scripts/make-douyin-magic666-video.js --theme=离职幻想 --videos-only --only-scene=tao-yuanming',
+    '  node scripts/make-douyin-magic666-video.js --theme=存钱幻想 --print-video-prompts --only-scene=future-worker',
     '',
     'Auth:',
     '  MAGIC666_API_KEY or MAGIC666_AUTH is preferred.',
@@ -96,6 +115,7 @@ function usage() {
     '  --compose-grok-video uses 1s lead/trail silence on cover and ending voiceovers.',
     '  Scene cuts use blurred cross transitions by default, not black frames.',
     '  Tune with --transition-duration and --audio-fade when the pacing feels too abrupt or too slow.',
+    '  Grok scene duration defaults to estimated Mandarin reading time plus 0.5s lead and 0.5s trail.',
   ].join('\n');
 }
 
@@ -282,11 +302,149 @@ function promptForLizhihuanxiang() {
   };
 }
 
+function promptForCunqianhuanxiang() {
+  return {
+    theme: '存钱幻想',
+    title: '为什么钱总存不下',
+    hook: '时代一直在变，想攒钱的人没变。',
+    setup: '只是生活，总比钱包先到。',
+    ending: '想存是真的。\n存不下，也是真的。\n工资像路过了一下，\n就去奔赴新生活了。',
+    coverImagePrompt: [
+      'Cinematic Korean drama poster, four money symbols floating in stormy air:',
+      'an ancient coin pouch, a 1990s salary envelope, a modern bank card and phone bill, and a futuristic holographic wallet leaking light,',
+      'dark humorous money-saving fantasy, rain, neon reflections, high contrast, premium short drama poster,',
+      'leave empty space for Chinese title text, no readable text, no watermark.',
+    ].join(' '),
+    endingImagePrompt: [
+      'Minimalist cinematic ending card, black background, an ancient coin pouch, a 1990s salary envelope, a modern bank card,',
+      'and a futuristic holographic wallet all becoming almost empty at the same time, money passing through like a brief visitor,',
+      'quiet emotional Korean drama finale mood, high contrast, clean composition, leave empty center space for Chinese copy,',
+      'no readable text, no watermark.',
+    ].join(' '),
+    videoStylePrompt: [
+      '整条视频是“存钱幻想”主题的跨时空黑色幽默短剧。四个人物都想攒钱，但钱总在生活压力里先被扣走。',
+      '整体风格是韩剧式电影感加现实荒诞喜剧：雨夜、慢推镜头、账单压迫感、突然静音、最后一秒轻微反讽。',
+      '每段都像同一条短剧里的“生活账本证言镜头”，人物可以看向镜头，也可以略微偏离镜头，但整体镜头语言要统一。',
+      '语言是中文普通话。人物表演应明显是在说中文台词，请根据指定音色和语气来设计嘴型、表情、停顿和动作。',
+      '画面不要内嵌字幕，不要出现可读文字，不要水印。',
+    ].join('\n'),
+    scenes: [
+      {
+        id: 'ancient-accountant',
+        name: '古代账房先生',
+        gender: '男性',
+        visualAge: '中年男性，约 38 岁',
+        voiceTone: '中年男性声音，低沉、克制、略疲惫，有账房先生的谨慎感。语气前半句像认真算账，后半句露出苦笑。',
+        roleFunction: '第 1 段，共 4 段。这个古代人物负责打开主题：他天天替东家数钱，却逃不过赋税、田租和杂役，用时代压迫制造第一层共鸣。',
+        line: '我天天数银子，却没几枚是自己的；赋税、田租、杂役一到，算盘都救不了穷人。',
+        imagePrompt: [
+          'Cinematic Korean drama style, ancient Chinese merchant counting room at rainy night,',
+          'a tired middle-aged Chinese male accountant around 38 years old, linen robe, simple cloth hat, short beard,',
+          'abacus, copper coins, ledgers made of bamboo slips and paper, tax notices without readable text, a small nearly empty coin pouch on the desk,',
+          'shadowy figures outside the door suggesting tax collectors and rent collectors,',
+          'warm candlelight, melancholic but darkly humorous mood, emotional close-up, high contrast, no text, no watermark.',
+        ].join(' '),
+        videoPrompt: [
+          '第 1 段，共 4 段。主题：跨时空存钱幻想。',
+          '这个古代人物负责打开主题：他天天替东家数钱，却逃不过赋税、田租和杂役，用时代压迫制造第一层共鸣。',
+          '人物性别：男性。视觉年龄：中年男性，约 38 岁。',
+          '语言：中文普通话。音色：中年男性声音，低沉、克制、略疲惫，有账房先生的谨慎感。语气前半句像认真算账，后半句露出苦笑。',
+          '画面：一位疲惫的中国古代账房先生，坐在雨夜商铺账房里。他穿素色麻布长袍，戴朴素布帽，留短须。桌上有算盘、铜钱、账本、竹简、税契样式的纸张和一个几乎空的钱袋。室内是暖色烛光，窗外下雨，门外有催税催租的人影，但不要出现可读文字。',
+          '表演：他先认真数银子、拨算盘，像是在替东家算一笔大账。说到“没几枚是自己的”时，他把几枚铜钱推到自己这边又停住。说到“赋税、田租、杂役”时，门外影子压过来，最后他看着算盘，手停住。',
+          '后期配音/字幕台词：“我天天数银子，却没几枚是自己的；赋税、田租、杂役一到，算盘都救不了穷人。”',
+          '节奏：前半段要像严肃账房算账；后半段转成时代压迫下的无力感。算盘停下后可以短暂静音，只留下雨声和铜钱轻响。',
+          '不要内嵌字幕，不要可读文字，不要水印。',
+        ].join(' '),
+      },
+      {
+        id: 'factory-worker',
+        name: '近现代厂工人',
+        gender: '男性',
+        visualAge: '中年男性，约 45 岁',
+        voiceTone: '中年男性声音，朴实、沙哑、压着情绪，有上世纪工人的年代感。前半句像相信稳定生活，后半句变成认命的苦笑。',
+        roleFunction: '第 2 段，共 4 段。这个近现代人物负责承接古代压力和现代生活：铁饭碗看似稳定，但孩子学费和老人医药费比工资更快到来。',
+        line: '我以为铁饭碗能让我慢慢存钱，后来才发现，孩子学费和老人医药费，比工资先到。',
+        imagePrompt: [
+          'Cinematic Korean drama style, 1990s Chinese state-owned factory dormitory at night,',
+          'a tired middle-aged Chinese male factory worker around 45 years old, old blue work uniform, employee badge, weathered face,',
+          'salary envelope, enamel mug, old factory ID card, child exercise book, simple medicine bottles or hospital receipts without readable text, old bicycle near the wall,',
+          'warm yellow tungsten light, nostalgic but heavy mood, realistic black comedy, no readable text, no watermark.',
+        ].join(' '),
+        videoPrompt: [
+          '第 2 段，共 4 段。延续同一条短剧的视觉风格和主题。',
+          '这个近现代人物负责承接古代压力和现代生活：铁饭碗看似稳定，但孩子学费和老人医药费比工资更快到来。',
+          '人物性别：男性。视觉年龄：中年男性，约 45 岁。',
+          '语言：中文普通话。音色：中年男性声音，朴实、沙哑、压着情绪，有上世纪工人的年代感。前半句像相信稳定生活，后半句变成认命的苦笑。',
+          '画面：一位 45 岁左右的中国国营厂工人，坐在 90 年代职工宿舍或老厂房休息室里。他穿旧蓝色工装，戴旧工牌，桌上有工资袋、搪瓷杯、孩子作业本、药瓶或医院单据，墙边有老自行车。室内是昏黄灯光，画面有年代感。所有纸张和单据不要出现可读文字。',
+          '表演：他拿着工资袋，刚想把钱放进铁盒里。看到孩子作业本和老人药瓶时，手停住。最后他把钱分成几份，自己那份最少，表情朴实又无奈。',
+          '后期配音/字幕台词：“我以为铁饭碗能让我慢慢存钱，后来才发现，孩子学费和老人医药费，比工资先到。”',
+          '节奏：前半段有“稳定工作终于能攒钱”的期待；后半段被家庭责任压住。镜头慢推，昏黄灯光，情绪克制，不要煽情过度。',
+          '不要内嵌字幕，不要可读文字，不要水印。',
+        ].join(' '),
+      },
+      {
+        id: 'modern-worker',
+        name: '现代打工人',
+        gender: '女性',
+        visualAge: '青年女性，约 28 岁',
+        voiceTone: '青年女性声音，自然、略沙哑、疲惫但清醒。语气像刚发工资就被现实教育的人，前半句有期待，后半句无奈自嘲。',
+        roleFunction: '第 3 段，共 4 段。这个现代人物负责打中当下共鸣：刚想存钱，房租、花呗、体检和给爸妈的转账就一起到来。',
+        line: '我刚想把工资转进存款，房租、花呗、体检和给爸妈的转账，就一起敲门了。',
+        imagePrompt: [
+          'Cinematic Korean drama style, late-night small rented apartment and laptop desk, exhausted Chinese female office worker age 28,',
+          'wrinkled blazer, employee badge, dark circles, bank card, phone payment notifications without readable text, rental contract, medical checkup report, bills without readable text,',
+          'blue screen light, rain outside the window, realistic black comedy mood, no text, no watermark.',
+        ].join(' '),
+        videoPrompt: [
+          '第 3 段，共 4 段。延续同一条短剧的视觉风格和主题。',
+          '这个现代人物负责打中当下共鸣：刚想存钱，房租、花呗、体检和给爸妈的转账就一起到来。',
+          '人物性别：女性。视觉年龄：青年女性，约 28 岁。',
+          '语言：中文普通话。音色：青年女性声音，自然、略沙哑、疲惫但清醒。语气像刚发工资就被现实教育的人，前半句有期待，后半句无奈自嘲。',
+          '画面：一位 28 岁左右的中国女性打工人，深夜坐在狭小出租屋的书桌前。她穿皱了的通勤西装外套，戴工牌，有黑眼圈。桌上有银行卡、手机、笔记本电脑、房租合同、体检报告和账单，屏幕和通知上不要出现可读文字。窗外下雨，室内是蓝色屏幕光。',
+          '表演：她打开手机准备把工资转入存款，眼睛有一点期待。随后通知一条条弹出，她先愣住，然后无奈笑了一下，把存款页面关掉，最后给爸妈转账。',
+          '后期配音/字幕台词：“我刚想把工资转进存款，房租、花呗、体检和给爸妈的转账，就一起敲门了。”',
+          '节奏：前半段像轻微希望，后半段被现实熟练打断。保持雨夜、近景、压抑但有黑色幽默。',
+          '不要内嵌字幕，不要可读文字，不要水印。',
+        ].join(' '),
+      },
+      {
+        id: 'future-worker',
+        name: '未来星际打工人',
+        gender: '男性',
+        visualAge: '青年男性，约 31 岁',
+        voiceTone: '青年男性声音，冷静、疲惫、带一点电子通讯质感。语气像在太空舱里认真汇报，后半句突然变成荒诞账单压力。',
+        roleFunction: '第 4 段，共 4 段。这个未来人物负责把主题推到荒诞尽头：到了未来，工资更高但扣款项目也全面升级。',
+        line: '我以为未来工资会更高，结果氧气、舱租、星际通勤，扣得比地球还积极。',
+        imagePrompt: [
+          'Cinematic futuristic Mars worker capsule, young Chinese male space office worker age 31, tired face inside transparent helmet,',
+          'holographic wallet, oxygen meter, capsule rent dashboard without readable text, Mars city and transit shuttle outside the window, cold blue and red warning lights,',
+          'dark sci-fi Korean drama lighting, absurd financial pressure comedy, emotional close-up, no readable text, no watermark.',
+        ].join(' '),
+        videoPrompt: [
+          '第 4 段，共 4 段。作为最终升级段落。',
+          '这个未来人物负责把主题推到荒诞尽头：到了未来，工资更高但扣款项目也全面升级。',
+          '这一段要和前三段形成呼应：第 1 段是钱袋，第 2 段是工资袋，第 3 段是工资卡，第 4 段是全息钱包。它们本质上都是“想攒钱，但生活先扣款”。',
+          '人物性别：男性。视觉年龄：青年男性，约 31 岁。',
+          '语言：中文普通话。音色：青年男性声音，冷静、疲惫、带一点电子通讯质感。语气像在太空舱里认真汇报，后半句突然变成荒诞账单压力。',
+          '画面：一位 31 岁左右的中国男性星际打工人，坐在未来火星工作舱里。他穿轻型太空工作服，透明头盔内露出疲惫表情。周围有全息钱包、氧气表、舱租仪表、星际通勤舱路线图和红蓝警示光，窗外是火星城市和通勤飞船。屏幕和仪表上不要出现可读文字。',
+          '表演：他看到全息工资到账，表情刚放松。随后氧气、舱租、星际通勤的扣费提示连续闪烁，他愣住，说到“比地球还积极”时苦笑着看向镜头。',
+          '后期配音/字幕台词：“我以为未来工资会更高，结果氧气、舱租、星际通勤，扣得比地球还积极。”',
+          '节奏：前半段是未来工资更高的期待；后半段突然变成更荒诞的生活扣款。使用慢推镜头、红蓝警示光、短暂停顿和冷幽默。',
+          '不要内嵌字幕，不要可读文字，不要水印。',
+        ].join(' '),
+      },
+    ],
+  };
+}
+
 function buildScript(theme) {
-  if (theme !== '离职幻想') {
-    throw new Error('This first maker script currently ships the ready-to-render theme: 离职幻想.');
+  if (theme === '离职幻想') {
+    return promptForLizhihuanxiang();
   }
-  return promptForLizhihuanxiang();
+  if (theme === '存钱幻想') {
+    return promptForCunqianhuanxiang();
+  }
+  throw new Error('This maker script currently ships ready-to-render themes: 离职幻想, 存钱幻想.');
 }
 
 async function postJson(endpoint, body, auth) {
@@ -375,13 +533,43 @@ async function generateImage(scene, auth, outputPath) {
   return url;
 }
 
+function isolateVideoPrompt(scene) {
+  return scene.videoPrompt
+    .replace(/第\s*\d+\s*段，共\s*\d+\s*段。/g, '')
+    .replace(/作为最终升级段落。/g, '')
+    .replace(/延续同一条短剧的视觉风格和主题。\s*/g, '')
+    .replace(/这一段要和前三段形成呼应：[^。]+。/g, '')
+    .replace(/它们本质上都是[^。]+。/g, '')
+    .replace(/这个古代人物负责打开主题：/g, '本段只表现这位人物：')
+    .replace(/这个近现代人物负责承接古代压力和现代生活：/g, '本段只表现这位人物：')
+    .replace(/这个现代人物负责打中当下共鸣：/g, '本段只表现这位人物：')
+    .replace(/这个未来人物负责把主题推到荒诞尽头：/g, '本段只表现这位人物：')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildVideoPrompt(scene) {
+  const seconds = estimateSceneSeconds(scene);
+  // Grok 文生视频必须按单人单场景隔离，避免模型把跨时代总设定误解成多场景混剪。
+  return [
+    '单段独立文生视频提示词：只生成这一位人物、这一处场景、这一段动作，不要合并其他人物、其他时代或其他场景。',
+    `目标视频时长：${seconds} 秒。开头先留 0.5 秒表情和动作预备，不要立刻开口；中间用中文普通话正常语速完整说完台词；结尾再留 0.5 秒表情收住。`,
+    `口播硬性要求：人物必须开口说完整台词“${scene.line}”。使用视频原生现场同期声，声音自然清晰，像真人在镜头前讲出来。嘴型、停顿和表情必须对应这句中文台词；不要只做动作或沉默看镜头，不要省略台词，不要只用背景音乐、环境音或后期旁白代替人物说话。`,
+    `人物：${scene.name}。`,
+    isolateVideoPrompt(scene),
+    `视觉细节补充（仅适用于本段）：${scene.imagePrompt}`,
+    '输出限制：画面不要内嵌字幕，不要出现可读文字，不要水印。',
+  ].join('\n\n');
+}
+
 async function generateVideo(scene, auth, outputPath, script) {
   // 视频按最新方案走纯文本生成；图片资产单独生成，最终只通过 ffmpeg 做剪辑整合。
+  const seconds = estimateSceneSeconds(scene);
   const task = await postJson('/videos', {
     model: VIDEO_MODEL,
-    prompt: `${script.videoStylePrompt}\n\n${scene.videoPrompt}\n\n视觉细节补充：${scene.imagePrompt}`,
+    prompt: buildVideoPrompt(scene, script),
     aspect_ratio: VIDEO_ASPECT,
-    seconds: '5',
+    seconds: String(seconds),
   }, auth);
   if (!task.task_id) throw new Error(`Video task missing task_id for ${scene.id}`);
   const url = await pollVideo(task.task_id, auth);
@@ -465,13 +653,13 @@ function extractMinimaxAudioBuffer(data) {
   return Buffer.from(audio, 'base64');
 }
 
-async function generateMinimaxVoiceover({ apiKey, groupId, text, outputPath, jsonPath, label }) {
+async function generateMinimaxVoiceover({ apiKey, groupId, text, outputPath, jsonPath, label, voiceId }) {
   const body = {
     model: readArg('--minimax-model') || MINIMAX_TTS_MODEL,
     text,
     stream: false,
     voice_setting: {
-      voice_id: readArg('--minimax-voice') || MINIMAX_VOICE_ID,
+      voice_id: readArg('--minimax-voice') || voiceId || MINIMAX_VOICE_ID,
       speed: Number(readArg('--minimax-speed') || process.env.MINIMAX_SPEED || 1),
       vol: Number(readArg('--minimax-vol') || process.env.MINIMAX_VOL || 1),
       pitch: Number(readArg('--minimax-pitch') || process.env.MINIMAX_PITCH || 0),
@@ -538,6 +726,19 @@ async function generateVoiceovers(script, root, auth) {
 async function generateMinimaxVoiceovers(script, root, minimaxAuth) {
   const voiceDir = path.join(root, 'voiceover');
   ensureDir(voiceDir);
+  const onlyScene = readArg('--only-scene');
+  const includeSceneVoiceovers = hasFlag('--voiceover-scenes') || Boolean(onlyScene && !['cover', 'ending'].includes(onlyScene));
+  const sceneTasks = includeSceneVoiceovers
+    ? script.scenes.map((scene) => ({
+      label: scene.id,
+      text: scene.line,
+      outputPath: path.join(voiceDir, `${scene.id}.mp3`),
+      jsonPath: path.join(voiceDir, `${scene.id}.minimax.json`),
+      voiceId: scene.gender === '女性'
+        ? (process.env.MINIMAX_FEMALE_VOICE_ID || MINIMAX_VOICE_ID)
+        : (process.env.MINIMAX_MALE_VOICE_ID || MINIMAX_VOICE_ID),
+    }))
+    : [];
   const tasks = [
     {
       label: 'cover',
@@ -551,7 +752,9 @@ async function generateMinimaxVoiceovers(script, root, minimaxAuth) {
       outputPath: path.join(voiceDir, 'ending.mp3'),
       jsonPath: path.join(voiceDir, 'ending.minimax.json'),
     },
-  ];
+    ...sceneTasks,
+  ].filter((task) => !onlyScene || task.label === onlyScene);
+  if (!tasks.length) throw new Error(`No MiniMax voiceover target matched --only-scene=${onlyScene}.`);
 
   const outputs = [];
   for (const task of tasks) {
@@ -783,10 +986,6 @@ function postprocessImages(script, root, tempDir) {
   for (let index = 0; index < imageTargets.length; index += 1) {
     const item = imageTargets[index];
     const sourcePath = path.join(imageDir, `${String(index).padStart(2, '0')}-${item.id}.png`);
-    if (!fs.existsSync(sourcePath)) {
-      throw new Error(`Missing source image for ${item.name}: ${sourcePath}`);
-    }
-
     const textLayerPath = path.join(textLayerDir, `${String(index).padStart(2, '0')}-${item.id}-text.png`);
     const outputPath = path.join(verticalDir, `${String(index).padStart(2, '0')}-${item.id}.png`);
     renderTextLayer({
@@ -794,6 +993,17 @@ function postprocessImages(script, root, tempDir) {
       outputPath: textLayerPath,
       tempDir,
     });
+    if (!fs.existsSync(sourcePath)) {
+      outputs.push({
+        name: item.name,
+        source: sourcePath,
+        textLayer: textLayerPath,
+        output: null,
+        skipped: true,
+        reason: 'missing source image; text layer generated for text-to-video overlay',
+      });
+      continue;
+    }
     overlayTextLayer({ imagePath: sourcePath, textLayerPath, outputPath });
     outputs.push({ name: item.name, source: sourcePath, textLayer: textLayerPath, output: outputPath });
   }
@@ -1003,16 +1213,19 @@ function makeSilentImageSegment({ imagePath, outputPath, duration }) {
   ]);
 }
 
-function makeImageSegmentWithOptionalAudio({ imagePath, audioPath, outputPath, duration, audioPadding = 0 }) {
+function makeImageSegmentWithOptionalAudio({ imagePath, audioPath, outputPath, duration, audioPadding = 0, audioVolume = 1 }) {
   const audioInput = audioPath && fs.existsSync(audioPath)
     ? ['-i', audioPath]
     : ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100'];
   const segmentDuration = audioPath && fs.existsSync(audioPath)
     ? Math.max(duration, getMediaDuration(audioPath) + audioPadding * 2 + 0.1)
     : duration;
-  const audioFilter = audioPath && fs.existsSync(audioPath) && audioPadding > 0
-    ? `adelay=${Math.round(audioPadding * 1000)}:all=1,apad`
-    : 'apad';
+  const audioFilters = [];
+  if (audioPath && fs.existsSync(audioPath) && audioPadding > 0) {
+    audioFilters.push(`adelay=${Math.round(audioPadding * 1000)}:all=1`);
+  }
+  if (audioVolume !== 1) audioFilters.push(`volume=${audioVolume}`);
+  audioFilters.push('apad');
   run('ffmpeg', [
     '-y',
     '-loop', '1',
@@ -1020,7 +1233,7 @@ function makeImageSegmentWithOptionalAudio({ imagePath, audioPath, outputPath, d
     '-i', imagePath,
     ...audioInput,
     '-vf', 'scale=1080:1920,setsar=1',
-    '-af', audioFilter,
+    '-af', audioFilters.join(','),
     '-map', '0:v',
     '-map', '1:a',
     '-t', String(segmentDuration),
@@ -1068,20 +1281,25 @@ function normalizeGrokSegment({ inputVideo, textLayerPath, audioText, outputPath
   ]);
 }
 
-function normalizeGrokSegmentWithSourceAudio({ inputVideo, textLayerPath, outputPath, duration = 5 }) {
+function normalizeGrokSegmentWithSourceAudio({ inputVideo, textLayerPath, outputPath, audioPath, duration = 5 }) {
+  const externalAudio = audioPath && fs.existsSync(audioPath);
+  const audioInput = externalAudio ? ['-i', audioPath] : [];
+  const audioFilter = externalAudio ? ';[2:a]apad[a]' : '';
+  const audioMap = externalAudio ? ['-map', '[a]'] : ['-map', '0:a:0?'];
   run('ffmpeg', [
     '-y',
     '-i', inputVideo,
     '-i', textLayerPath,
+    ...audioInput,
     '-filter_complex',
     [
       '[0:v:0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=28:1[bg];',
       '[0:v:0]scale=1080:-1:force_original_aspect_ratio=decrease[fg];',
       '[bg][fg]overlay=(W-w)/2:(H-h)/2[base];',
-      '[base][1:v]overlay=0:0,format=yuv420p[v]',
+      `[base][1:v]overlay=0:0,format=yuv420p[v]${audioFilter}`,
     ].join(''),
     '-map', '[v]',
-    '-map', '0:a:0?',
+    ...audioMap,
     '-t', String(duration),
     '-r', '30',
     '-c:v', 'libx264',
@@ -1097,6 +1315,7 @@ function normalizeGrokSegmentWithSourceAudio({ inputVideo, textLayerPath, output
 function composeStaticVideo(script, root, tempDir) {
   const verticalDir = path.join(root, 'images-vertical');
   const finalVideoDir = path.join(root, 'videos');
+  const endingImageName = `${String(script.scenes.length + 1).padStart(2, '0')}-ending.png`;
   ensureDir(finalVideoDir);
 
   const segments = [
@@ -1115,7 +1334,7 @@ function composeStaticVideo(script, root, tempDir) {
       duration: 6.5,
     })),
     {
-      image: path.join(verticalDir, '04-ending.png'),
+      image: path.join(verticalDir, endingImageName),
       audioText: toSpeechText(script.ending),
       output: path.join(finalVideoDir, 'seg-99-ending-static.mp4'),
       name: 'ending-static',
@@ -1148,6 +1367,7 @@ function composeGrokVideo(script, root, tempDir) {
   const rawVideoDir = path.join(root, 'videos-raw');
   const finalVideoDir = path.join(root, 'videos');
   const voiceDir = path.join(root, 'voiceover');
+  const endingImageName = `${String(script.scenes.length + 1).padStart(2, '0')}-ending.png`;
   ensureDir(finalVideoDir);
 
   function optionalVoiceover(name) {
@@ -1158,6 +1378,7 @@ function composeGrokVideo(script, root, tempDir) {
     ];
     return candidates.find((candidate) => fs.existsSync(candidate)) || null;
   }
+  const useSceneVoiceover = hasFlag('--use-scene-voiceover');
 
   const coverSegment = path.join(finalVideoDir, 'seg-00-cover-grok.mp4');
   makeImageSegmentWithOptionalAudio({
@@ -1167,6 +1388,7 @@ function composeGrokVideo(script, root, tempDir) {
     duration: 3.5,
     // 首尾旁白前后各留 1 秒，避免声音贴着画面边界突然进入或退出。
     audioPadding: 1,
+    audioVolume: 1.25,
   });
 
   const finalSegments = [coverSegment];
@@ -1182,19 +1404,22 @@ function composeGrokVideo(script, root, tempDir) {
       inputVideo: rawVideoPath,
       textLayerPath,
       outputPath: segmentPath,
-      duration: 5,
+      // 人物段默认保留 Grok 生成视频里的原生同期声；TTS 只作为显式兜底，避免丢掉更自然的口播。
+      audioPath: useSceneVoiceover ? optionalVoiceover(scene.id) : null,
+      duration: Math.max(estimateSceneSeconds(scene), getMediaDuration(rawVideoPath)),
     });
     finalSegments.push(segmentPath);
   }
 
   const endingSegment = path.join(finalVideoDir, 'seg-99-ending-grok.mp4');
   makeImageSegmentWithOptionalAudio({
-    imagePath: path.join(verticalDir, '04-ending.png'),
+    imagePath: path.join(verticalDir, endingImageName),
     audioPath: optionalVoiceover('ending'),
     outputPath: endingSegment,
     duration: 4.5,
     // 结尾金句需要留呼吸感，和封面使用相同的旁白留白规则。
     audioPadding: 1,
+    audioVolume: 1.25,
   });
   finalSegments.push(endingSegment);
 
@@ -1221,7 +1446,7 @@ function makeImagePreviews(script, root) {
   ];
   return targets.map((target) => {
     const input = path.join(verticalDir, target.file);
-    if (!fs.existsSync(input)) throw new Error(`Missing vertical image for preview: ${input}`);
+    if (!fs.existsSync(input)) return { id: target.id, input, output: null, skipped: true };
     const output = path.join(previewDir, target.file.replace(/\.png$/, '.jpg'));
     run('ffmpeg', ['-y', '-i', input, '-vf', 'scale=540:-1', '-frames:v', '1', '-q:v', '6', output]);
     return { id: target.id, input, output };
@@ -1270,6 +1495,26 @@ async function main() {
   ensureDir(tempDir);
 
   fs.writeFileSync(path.join(root, 'script.json'), JSON.stringify(script, null, 2), 'utf8');
+
+  if (hasFlag('--print-video-prompts')) {
+    const onlyScene = readArg('--only-scene');
+    const prompts = script.scenes
+      .filter((scene) => !onlyScene || scene.id === onlyScene)
+      .map((scene) => ({
+        id: scene.id,
+        name: scene.name,
+        seconds: estimateSceneSeconds(scene),
+        prompt: buildVideoPrompt(scene, script),
+      }));
+    if (!prompts.length) throw new Error(`No scene matched --only-scene=${onlyScene}.`);
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'print-video-prompts',
+      theme,
+      prompts,
+    }, null, 2));
+    return;
+  }
 
   if (hasFlag('--postprocess-images')) {
     const images = postprocessImages(script, root, tempDir);
